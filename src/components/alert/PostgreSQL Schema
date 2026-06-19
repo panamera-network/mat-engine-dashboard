@@ -1,0 +1,117 @@
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    symbol TEXT NOT NULL,
+    mode TEXT NOT NULL,              -- e.g. scalping, swing
+    event_type TEXT NOT NULL,        -- setup_valid, setup_invalidated, threshold_cross
+    severity TEXT NOT NULL,          -- info, warning, critical
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    recommendation TEXT NOT NULL,    -- Go, No-Go, Watch
+    source TEXT NOT NULL,            -- algo_engine_v1, etc.
+    unread BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- Indexes for fast queries
+CREATE INDEX idx_notifications_symbol ON notifications(symbol);
+CREATE INDEX idx_notifications_timestamp ON notifications(timestamp DESC);
+CREATE INDEX idx_notifications_unread ON notifications(unread);
+
+SELECT * FROM notifications
+WHERE ($1::text IS NULL OR symbol = $1)
+  AND ($2::text IS NULL OR mode = $2)
+  AND ($3::text IS NULL OR severity = $3)
+  AND ($4::boolean IS NULL OR unread = $4)
+ORDER BY timestamp DESC
+LIMIT $5 OFFSET $6;
+
+
+SELECT * FROM notifications
+WHERE unread = TRUE
+ORDER BY timestamp DESC;
+
+UPDATE notifications
+SET unread = FALSE
+WHERE id = 'uuid-here';
+
+UPDATE notifications
+SET unread = FALSE
+WHERE unread = TRUE;
+
+-- Track read/unread per user
+CREATE TABLE notification_status (
+    user_id UUID NOT NULL,
+    notification_id UUID NOT NULL REFERENCES notifications(id),
+    unread BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY (user_id, notification_id)
+);
+
+CREATE INDEX idx_status_unread ON notification_status(user_id, unread);
+
+CREATE TABLE user_channel_preferences (
+    user_id UUID NOT NULL,
+    channel TEXT NOT NULL,           -- e.g. "websocket", "push", "email", "slack"
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY (user_id, channel)
+);
+
+-- Optional: store channel-specific metadata (like email address, Slack webhook)
+CREATE TABLE user_channel_metadata (
+    user_id UUID NOT NULL,
+    channel TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (user_id, channel, key)
+);
+
+CREATE TABLE user_channel_rules (
+    user_id UUID NOT NULL,
+    channel TEXT NOT NULL,            -- push, email, slack, etc.
+    symbol TEXT NULL,                 -- e.g. 'EURUSD' (NULL = all symbols)
+    mode TEXT NULL,                   -- e.g. 'scalping' (NULL = all modes)
+    severity TEXT NULL,               -- e.g. 'critical' (NULL = all severities)
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY (user_id, channel, symbol, mode, severity)
+);
+
+-- Per-event escalation tracking
+CREATE TABLE notification_ack (
+    user_id UUID NOT NULL,
+    notification_id UUID NOT NULL,
+    acked BOOLEAN NOT NULL DEFAULT FALSE,
+    acked_at TIMESTAMPTZ NULL,
+    PRIMARY KEY (user_id, notification_id)
+);
+
+-- Escalation rules per user and severity/mode/symbol (wildcards via NULL)
+CREATE TABLE user_escalation_rules (
+    user_id UUID NOT NULL,
+    symbol TEXT NULL,
+    mode TEXT NULL,
+    severity TEXT NOT NULL,          -- e.g., 'critical'
+    step INT NOT NULL,               -- 1, 2, 3...
+    channel TEXT NOT NULL,           -- 'push', 'slack', 'voice', 'sms'
+    delay_seconds INT NOT NULL,      -- time from event to this step
+    max_retries INT NOT NULL DEFAULT 0,
+    backoff_seconds INT NOT NULL DEFAULT 60,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY (user_id, severity, symbol, mode, step)
+);
+
+-- Optional: per-user quiet hours / do-not-disturb
+CREATE TABLE user_dnd (
+    user_id UUID NOT NULL,
+    start_local_time TEXT NOT NULL,  -- '22:00'
+    end_local_time TEXT NOT NULL,    -- '07:00'
+    timezone TEXT NOT NULL           -- e.g., 'Asia/Kuala_Lumpur'
+);
+
+CREATE TABLE escalation_log (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL,
+    notification_id UUID NOT NULL,
+    step INT NOT NULL,
+    channel TEXT NOT NULL,
+    status TEXT NOT NULL,          -- sent, delivered, failed, acked, skipped
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

@@ -1,0 +1,27 @@
+import React, { useEffect, useState } from "react";
+
+export default function EscalationTimeline({ notificationId, userId }) {
+  const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    fetch(`/notifications/${notificationId}/escalation-history?user=${userId}`)
+      .then(res => res.json())
+      .then(setHistory);
+  }, [notificationId, userId]);
+
+  return (
+    <div className="timeline">
+      <h4>Escalation History</h4>
+      <ul>
+        {history.map((h, idx) => (
+          <li key={idx} className={`status-${h.status}`}>
+            <span className="step">Step {h.step}</span>
+            <span className="channel">{h.channel.toUpperCase()}</span>
+            <span className="status">{h.status}</span>
+            <span className="time">{new Date(h.timestamp).toLocaleTimeString()}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

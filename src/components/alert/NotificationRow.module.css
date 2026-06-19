@@ -1,0 +1,76 @@
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background-color: var(--color-bg-dark, #0f1115);
+  transition: background 0.2s ease;
+}
+
+.row:hover {
+  background-color: #151820;
+}
+
+.icon {
+  margin-top: 2px;
+}
+
+.content {
+  flex: 1;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.symbol {
+  font-weight: 600;
+  color: var(--color-text-primary, #e0e0e0);
+}
+
+.timestamp {
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #888);
+}
+
+.title {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.message {
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #aaa);
+}
+
+/* State Variants */
+.go {
+  border-left: 4px solid #00ff88;
+  color: #00ff88;
+}
+
+.watch {
+  border-left: 4px solid #ffb020;
+  color: #ffb020;
+}
+
+.noGo {
+  border-left: 4px solid #ff4d4d;
+  color: #ff4d4d;
+}
+
+.info {
+  border-left: 4px solid #3399ff;
+  color: #3399ff;
+}
+
+.unread {
+  font-weight: 600;
+  background-color: rgba(255, 255, 255, 0.05); /* subtle tint */
+  border-left: 4px solid currentColor;
+  box-shadow: 0 0 6px currentColor;
+}

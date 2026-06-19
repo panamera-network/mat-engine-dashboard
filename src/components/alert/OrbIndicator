@@ -1,0 +1,28 @@
+import React, { useEffect, useState } from "react";
+import styles from "./OrbIndicator.module.css";
+
+export default function OrbIndicator({ latestNotification, hasUnseen, unreadCount, onClick }) {
+  const [colorClass, setColorClass] = useState(styles.info);
+
+  useEffect(() => {
+    if (!latestNotification) return;
+    switch (latestNotification.recommendation) {
+      case "Go": setColorClass(styles.go); break;
+      case "Watch": setColorClass(styles.watch); break;
+      case "No-Go": setColorClass(styles.noGo); break;
+      default: setColorClass(styles.info);
+    }
+  }, [latestNotification]);
+
+  return (
+    <div className={styles.wrapper} onClick={onClick}>
+      <div
+        className={`${styles.orb} ${colorClass} ${hasUnseen ? styles.pulse : ""}`}
+        title={latestNotification ? latestNotification.title : "No alerts"}
+      />
+      {unreadCount > 0 && (
+        <span className={styles.badge}>{unreadCount}</span>
+      )}
+    </div>
+  );
+}

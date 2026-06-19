@@ -1,0 +1,47 @@
+import { useEffect, useState } from "react";
+
+export function useNotifications() {
+  const [notifications, setNotifications] = useState([]);
+  const [connected, setConnected] = useState(false);
+
+  // Fetch history on mount
+  useEffect(() => {
+    async function fetchHistory() {
+      const res = await fetch("http://localhost:8000/notifications/history?limit=50");
+      const data = await res.json();
+      setNotifications(data);
+    }
+    fetchHistory();
+  }, []);
+
+  // WebSocket for live updates
+  useEffect(() => {
+    const ws = new WebSocket("ws://localhost:8000/notifications/ws");
+
+    ws.onopen = () => setConnected(true);
+    ws.onclose = () => setConnected(false);
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setNotifications((prev) => [{ ...data, unread: true }, ...prev]);
+    };
+
+    return () => ws.close();
+  }, []);
+
+  // Mark all as read (sync with backend)
+  const markAllRead = async () => {
+    await fetch("http://localhost:8000/notifications/ack-all", { method: "POST" });
+    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+  };
+
+  // Mark one as read
+  const markOneRead = async (id) => {
+    await fetch(`http://localhost:8000/notifications/${id}/ack`, { method: "POST" });
+    setNotifications((prev) =>
+      prev.map((n) => (n.event_id === id ? { ...n, unread: false } : n))
+    );
+  };
+
+  return { notifications, connected, markAllRead, markOneRead };
+}

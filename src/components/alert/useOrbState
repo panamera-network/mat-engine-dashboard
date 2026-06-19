@@ -1,0 +1,22 @@
+import { useState, useEffect } from "react";
+
+export function useOrbState() {
+  const [latestNotification, setLatestNotification] = useState(null);
+  const [hasUnseen, setHasUnseen] = useState(false);
+
+  useEffect(() => {
+    const ws = new WebSocket("ws://localhost:8000/notifications/ws");
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setLatestNotification(data);
+      setHasUnseen(true); // trigger pulse
+    };
+
+    return () => ws.close();
+  }, []);
+
+  const acknowledge = () => setHasUnseen(false);
+
+  return { latestNotification, hasUnseen, acknowledge };
+}

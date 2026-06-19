@@ -1,0 +1,74 @@
+import React, { useEffect, useState } from "react";
+import NotificationRow from "./NotificationRow";
+
+export default function NotificationsPanel({ onClose, markAllRead, markOneRead }) {
+  const [notifications, setNotifications] = useState([]);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [filters, setFilters] = useState({ symbol: "", mode: "", severity: "" });
+
+  const fetchNotifications = async (reset = false) => {
+    const query = new URLSearchParams({
+      limit: 50,
+      offset: reset ? 0 : offset,
+      ...(filters.symbol && { symbol: filters.symbol }),
+      ...(filters.mode && { mode: filters.mode }),
+      ...(filters.severity && { severity: filters.severity })
+    });
+    const res = await fetch(`http://localhost:8000/notifications/history?${query}`);
+    const data = await res.json();
+
+    if (reset) {
+      setNotifications(data.items);
+      setOffset(50);
+    } else {
+      setNotifications((prev) => [...prev, ...data.items]);
+      setOffset(offset + 50);
+    }
+    setHasMore(data.items.length === 50);
+  };
+
+  useEffect(() => {
+    fetchNotifications(true);
+  }, [filters]);
+
+  const handleScroll = (e) => {
+    const bottom = e.target.scrollHeight - e.target.scrollTop === e.target.clientHeight;
+    if (bottom && hasMore) {
+      fetchNotifications();
+    }
+  };
+
+  return (
+    <div className="panel" onScroll={handleScroll}>
+      <div className="panelHeader">
+        <h3>Notifications</h3>
+        <select onChange={(e) => setFilters({ ...filters, symbol: e.target.value })}>
+          <option value="">All Symbols</option>
+          <option value="AUDCAD">AUDCAD</option>
+          <option value="EURUSD">EURUSD</option>
+        </select>
+        <select onChange={(e) => setFilters({ ...filters, mode: e.target.value })}>
+          <option value="">All Modes</option>
+          <option value="scalping">Scalping</option>
+          <option value="swing">Swing</option>
+        </select>
+        <select onChange={(e) => setFilters({ ...filters, severity: e.target.value })}>
+          <option value="">All Severities</option>
+          <option value="info">Info</option>
+          <option value="warning">Warning</option>
+          <option value="critical">Critical</option>
+        </select>
+        <button onClick={markAllRead}>Mark all as read</button>
+        <button onClick={onClose}>Close</button>
+      </div>
+
+      <div className="panelBody">
+        {notifications.map((n) => (
+          <NotificationRow key={n.event_id} data={n} onClick={markOneRead} />
+        ))}
+        {!hasMore && <div className="endMarker">End of history</div>}
+      </div>
+    </div>
+  );
+}

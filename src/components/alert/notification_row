@@ -1,0 +1,71 @@
+import React from "react";
+import { CheckCircle, AlertTriangle, XCircle, Info } from "react-feather";
+import styles from "./NotificationRow.module.css"; // or styled-components
+
+const stateStyles = {
+  Go: {
+    className: styles.go,
+    icon: <CheckCircle size={18} />
+  },
+  Watch: {
+    className: styles.watch,
+    icon: <AlertTriangle size={18} />
+  },
+  "No-Go": {
+    className: styles.noGo,
+    icon: <XCircle size={18} />
+  },
+  Info: {
+    className: styles.info,
+    icon: <Info size={18} />
+  }
+};
+
+export default function NotificationRow({ data, onClick }) {
+  const { 
+    symbol, 
+    mode, 
+    title, 
+    message, 
+    timestamp, 
+    recommendation, 
+    unread, 
+    escalation = []   // array of escalation steps
+  } = data;
+
+  // Find the last step (most recent escalation or ack)
+  const lastStep = escalation.length > 0 ? escalation[escalation.length - 1] : null;
+
+  // Build summary label
+  let summary = "";
+  if (lastStep) {
+    if (lastStep.status === "acked") {
+      summary = `Acked via ${lastStep.channel}`;
+    } else {
+      summary = `Escalated to ${lastStep.channel}`;
+    }
+  }
+
+  return (
+    <div
+      className={`${styles.row} ${styles[recommendation]} ${unread ? styles.unread : ""}`}
+      onClick={() => onClick(data.event_id)}
+    >
+      <div className={styles.content}>
+        <div className={styles.header}>
+          <span className={styles.symbol}>{symbol} · {mode}</span>
+          <span className={styles.timestamp}>{timestamp}</span>
+        </div>
+        <div className={styles.title}>{title}</div>
+        <div className={styles.message}>{message}</div>
+      </div>
+
+      {/* Collapsed summary badge */}
+      {lastStep && (
+        <div className={`${styles.summaryBadge} ${styles[lastStep.status]}`}>
+          {summary}
+        </div>
+      )}
+    </div>
+  );
+}

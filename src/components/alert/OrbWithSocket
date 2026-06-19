@@ -1,0 +1,24 @@
+import React, { useEffect, useState } from "react";
+import OrbIndicator from "./OrbIndicator";
+
+export default function OrbWithSocket() {
+  const [latestNotification, setLatestNotification] = useState(null);
+
+  useEffect(() => {
+    const ws = new WebSocket("ws://localhost:8000/notifications/ws");
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setLatestNotification(data); // update orb instantly
+    };
+
+    ws.onclose = () => console.log("WebSocket closed");
+    ws.onerror = (err) => console.error("WebSocket error", err);
+
+    return () => ws.close();
+  }, []);
+
+  return (
+    <OrbIndicator latestNotification={latestNotification} />
+  );
+}

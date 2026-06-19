@@ -1,0 +1,47 @@
+import React, { useMemo, useState } from "react";
+import NotificationRow from "./NotificationRow";
+
+export default function GroupedNotificationsPanel({ notifications, onRowClick }) {
+  const [collapsedSymbols, setCollapsedSymbols] = useState({});
+
+  // Group by symbol
+  const grouped = useMemo(() => {
+    return notifications.reduce((acc, n) => {
+      if (!acc[n.symbol]) acc[n.symbol] = [];
+      acc[n.symbol].push(n);
+      return acc;
+    }, {});
+  }, [notifications]);
+
+  const toggleSymbol = (symbol) => {
+    setCollapsedSymbols((prev) => ({
+      ...prev,
+      [symbol]: !prev[symbol]
+    }));
+  };
+
+  return (
+    <div className="panelBody">
+      {Object.entries(grouped).map(([symbol, rows]) => {
+        const unreadCount = rows.filter((n) => n.unread).length;
+        return (
+          <div key={symbol} className="symbolGroup">
+            <div className="symbolHeader" onClick={() => toggleSymbol(symbol)}>
+              <span>{collapsedSymbols[symbol] ? "▶" : "▼"} {symbol}</span>
+              {unreadCount > 0 && (
+                <span className="unreadBadge">{unreadCount}</span>
+              )}
+            </div>
+            {!collapsedSymbols[symbol] && (
+              <div className="symbolRows">
+                {rows.map((n) => (
+                  <NotificationRow key={n.event_id} data={n} onClick={onRowClick} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}

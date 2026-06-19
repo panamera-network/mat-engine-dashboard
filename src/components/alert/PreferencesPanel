@@ -1,0 +1,84 @@
+import React, { useState, useEffect } from "react";
+
+export default function PreferencesPanel({ userId }) {
+  const [prefs, setPrefs] = useState({
+    websocket: true,
+    push: false,
+    email: false,
+    slack: false
+  });
+  const [metadata, setMetadata] = useState({
+    email: "",
+    slack: ""
+  });
+
+  useEffect(() => {
+    // Load preferences from backend
+    fetch(`/api/users/${userId}/preferences`)
+      .then(res => res.json())
+      .then(data => {
+        setPrefs(data.prefs);
+        setMetadata(data.metadata);
+      });
+  }, [userId]);
+
+  const savePrefs = async () => {
+    await fetch(`/api/users/${userId}/preferences`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prefs, metadata })
+    });
+    alert("Preferences saved!");
+  };
+
+  return (
+    <div className="prefsPanel">
+      <h3>Notification Preferences</h3>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={prefs.push}
+          onChange={(e) => setPrefs({ ...prefs, push: e.target.checked })}
+        />
+        Push Notifications
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={prefs.email}
+          onChange={(e) => setPrefs({ ...prefs, email: e.target.checked })}
+        />
+        Email
+      </label>
+      {prefs.email && (
+        <input
+          type="email"
+          placeholder="Enter email"
+          value={metadata.email}
+          onChange={(e) => setMetadata({ ...metadata, email: e.target.value })}
+        />
+      )}
+
+      <label>
+        <input
+          type="checkbox"
+          checked={prefs.slack}
+          onChange={(e) => setPrefs({ ...prefs, slack: e.target.checked })}
+        />
+        Slack
+      </label>
+      {prefs.slack && (
+        <input
+          type="text"
+          placeholder="Slack webhook URL"
+          value={metadata.slack}
+          onChange={(e) => setMetadata({ ...metadata, slack: e.target.value })}
+        />
+      )}
+
+      <button onClick={savePrefs}>Save Preferences</button>
+    </div>
+  );
+}

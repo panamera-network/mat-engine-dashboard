@@ -1,0 +1,179 @@
+import React, { useEffect, useRef } from "react";
+import {
+  createChart,
+  ColorType,
+  ISeriesApi,
+  UTCTimestamp,
+  CandlestickData,
+  CandlestickSeries,
+} from "lightweight-charts";
+
+interface Tick {
+  symbol: string;
+  price: number;
+  time: number;
+}
+
+interface LiveChartProps {
+  baseSymbol: string;
+  timeframe: string;
+  ticks: Tick[];
+  onStatsUpdate: (stats: { name: string; latest: number } | null) => void;
+}
+
+type Candle = CandlestickData<UTCTimestamp>;
+
+function normalizeTimeframe(tf: string): number {
+  const lower = tf.toLowerCase().trim();
+  if (lower.endsWith("m")) return parseInt(lower.replace("m", ""), 10);
+  if (lower.endsWith("h")) return parseInt(lower.replace("h", ""), 10) * 60;
+  if (lower.endsWith("d")) return parseInt(lower.replace("d", ""), 10) * 1440;
+  const parsed = parseInt(lower, 10);
+  return isNaN(parsed) ? 1 : parsed;
+}
+
+let currentCandle: Candle | null = null;
+
+const LiveChart: React.FC<LiveChartProps> = ({
+  baseSymbol,
+  timeframe,
+  ticks,
+  onStatsUpdate,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+
+// ✅ Create chart + candlestick series + seed with MT5 history
+useEffect(() => {
+  if (!containerRef.current) return;
+
+  chartRef.current = createChart(containerRef.current, {
+    width: containerRef.current.clientWidth,
+    height: 400,
+    layout: {
+      background: { type: ColorType.Solid, color: "#0f1115" },
+      textColor: "#d1d1d1",
+    },
+    grid: {
+      vertLines: { color: "#1a1d23" },
+      horzLines: { color: "#1a1d23" },
+    },
+    timeScale: { timeVisible: true },
+  });
+
+  seriesRef.current = chartRef.current.addSeries(CandlestickSeries, {
+    upColor: "#26a69a",
+    downColor: "#ef5350",
+    borderVisible: false,
+    wickUpColor: "#26a69a",
+    wickDownColor: "#ef5350",
+  });
+
+  // Normalize timeframe string (e.g., "1m" → 1)
+  const tfMinutes = normalizeTimeframe(timeframe);
+
+  // ✅ MT5 history endpoint
+  const url = `http://localhost:8000/api/mt5/history?symbol=${encodeURIComponent(
+    baseSymbol
+  )}&timeframe=${tfMinutes}&bars=500`;
+
+  fetch(url)
+    .then(res => res.json())
+    .then((bars: Array<{ time: number; open: number; high: number; low: number; close: number }>) => {
+      // Some MT5 bridges return ms; normalize to seconds
+      const mapped = (bars ?? []).map(b => {
+        let t = Number(b.time);
+        if (t > 1e12) t = Math.floor(t / 1000); // ms → s
+        else t = Math.floor(t);
+        return {
+          time: t as UTCTimestamp,
+          open: Number(b.open),
+          high: Number(b.high),
+          low: Number(b.low),
+          close: Number(b.close),
+        };
+      });
+
+      if (mapped.length) {
+        seriesRef.current?.setData(mapped);
+        currentCandle = mapped[mapped.length - 1];
+        chartRef.current?.timeScale().fitContent();
+        console.log("📜 Seeded MT5 history", mapped.length, "bars from", url);
+      } else {
+        console.warn("⚠️ MT5 history empty for", { baseSymbol, tfMinutes });
+      }
+    })
+    .catch(err => console.error("⚠️ MT5 history fetch error", err, "URL:", url));
+
+  return () => {
+    chartRef.current?.remove();
+    chartRef.current = null;
+    seriesRef.current = null;
+    currentCandle = null;
+  };
+}, [baseSymbol, timeframe]);
+
+
+  // ✅ Merge incoming ticks into current candle
+  useEffect(() => {
+    if (!seriesRef.current || !ticks.length) return;
+
+    const tfMinutes = normalizeTimeframe(timeframe);
+    const tfSeconds = tfMinutes * 60;
+
+    ticks.forEach((tick) => {
+      const price = Number(tick.price);
+      if (!Number.isFinite(price) || price <= 0) {
+        console.warn("⚠️ Invalid price, skipping", tick);
+        return;
+      }
+
+      let tickTime = Number(tick.time);
+      if (tickTime > 1e12) tickTime = Math.floor(tickTime / 1000); // ms → s
+      else tickTime = Math.floor(tickTime);
+
+      if (!Number.isFinite(tickTime) || tickTime <= 0) {
+        console.warn("⚠️ Invalid time, skipping", tick);
+        return;
+      }
+
+      const candleTime = Math.floor(tickTime / tfSeconds) * tfSeconds as UTCTimestamp;
+
+      // ✅ Guard against out‑of‑order ticks
+      if (currentCandle && candleTime < currentCandle.time) {
+        console.warn("⏪ Out‑of‑order tick dropped", {
+          tickTime,
+          candleTime,
+          currentCandleTime: currentCandle.time,
+        });
+        return;
+      }
+
+      if (!currentCandle || currentCandle.time !== candleTime) {
+        currentCandle = {
+          time: candleTime,
+          open: price,
+          high: price,
+          low: price,
+          close: price,
+        };
+        seriesRef.current?.update(currentCandle);
+        chartRef.current?.timeScale().fitContent();
+        console.log("➕ New candle", currentCandle);
+      } else {
+        currentCandle.high = Math.max(currentCandle.high, price);
+        currentCandle.low = Math.min(currentCandle.low, price);
+        currentCandle.close = price;
+        seriesRef.current?.update(currentCandle);
+        console.log("🔄 Updated candle", currentCandle);
+      }
+
+      onStatsUpdate?.({ name: baseSymbol, latest: price });
+    });
+  }, [ticks, timeframe, baseSymbol, onStatsUpdate]);
+
+  return <div ref={containerRef} style={{ width: "100%", height: "400px" }} />;
+};
+
+export default LiveChart;

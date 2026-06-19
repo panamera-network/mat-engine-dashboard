@@ -1,0 +1,32 @@
+import React, { useState } from "react";
+import { useNotifications } from "./useNotifications";
+import OrbIndicator from "./OrbIndicator";
+import NotificationsPanel from "./NotificationsPanel";
+
+export default function Toolbar() {
+  const { notifications, markAllRead, markOneRead } = useNotifications();
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  const unreadCount = notifications.filter((n) => n.unread).length;
+  const latestNotification = notifications[0];
+  const hasUnseen = unreadCount > 0;
+
+  return (
+    <>
+      <OrbIndicator
+        latestNotification={latestNotification}
+        hasUnseen={hasUnseen}
+        unreadCount={unreadCount}
+        onClick={() => setPanelOpen(true)}
+      />
+      {panelOpen && (
+        <NotificationsPanel
+          notifications={notifications}
+          markAllRead={markAllRead}
+          markOneRead={markOneRead}
+          onClose={() => setPanelOpen(false)}
+        />
+      )}
+    </>
+  );
+}

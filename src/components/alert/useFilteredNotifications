@@ -1,0 +1,83 @@
+import { useEffect, useState } from "react";
+
+export function useNotifications(filters) {
+  const [notifications, setNotifications] = useState([]);
+
+  // Fetch history with multi-filters
+  useEffect(() => {
+    async function fetchHistory() {
+      const query = new URLSearchParams({
+        limit: 50,
+        offset: 0,
+        ...(filters.symbols.length && { symbols: filters.symbols.join(",") }),
+        ...(filters.modes.length && { mode: filters.modes.join(",") }),
+        ...(filters.severities.length && { severity: filters.severities.join(",") })
+      });
+      const res = await fetch(`http://localhost:8000/notifications/history?${query}`);
+      const data = await res.json();
+      setNotifications(data.items);
+    }
+    fetchHistory();
+  }, [filters]);
+
+  // WebSocket live updates
+  useEffect(() => {
+    const ws = new WebSocket("ws://localhost:8000/notifications/ws");
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      const matchSymbol = !filters.symbols.length || filters.symbols.includes(data.symbol);
+      const matchMode = !filters.modes.length || filters.modes.includes(data.mode);
+      const matchSeverity = !filters.severities.length || filters.severities.includes(data.severity);
+
+      if (matchSymbol && matchMode && matchSeverity) {
+        setNotifications((prev) => [{ ...data, unread: true }, ...prev]);
+      }
+    };
+
+    return () => ws.close();
+  }, [filters]);
+
+  return { notifications };
+}
+
+import { useEffect, useState } from "react";
+
+export function useNotifications(userId) {
+  const [notifications, setNotifications] = useState([]);
+
+  // Fetch history from backend (per user)
+  useEffect(() => {
+    async function fetchHistory() {
+      const res = await fetch(`http://localhost:8000/notifications/history?user=${userId}`);
+      const data = await res.json();
+      setNotifications(data.items);
+    }
+    fetchHistory();
+  }, [userId]);
+
+  // WebSocket live updates
+  useEffect(() => {
+    const ws = new WebSocket(`ws://localhost:8000/notifications/ws?user=${userId}`);
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setNotifications((prev) => [{ ...data, unread: true }, ...prev]);
+    };
+    return () => ws.close();
+  }, [userId]);
+
+  const markAllRead = async () => {
+    await fetch(`http://localhost:8000/notifications/ack-all?user=${userId}`, { method: "POST" });
+    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+  };
+
+  const markOneRead = async (id) => {
+    await fetch(`http://localhost:8000/notifications/${id}/ack?user=${userId}`, { method: "POST" });
+    setNotifications((prev) =>
+      prev.map((n) => (n.event_id === id ? { ...n, unread: false } : n))
+    );
+  };
+
+  return { notifications, markAllRead, markOneRead };
+}

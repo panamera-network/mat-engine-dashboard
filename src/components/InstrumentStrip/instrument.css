@@ -1,0 +1,28 @@
+.volatility-meter {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.needle {
+  background: var(--accent-blue);
+  box-shadow: 0 0 12px var(--accent-blue);
+}
+.wave-positive {
+  stroke: var(--bullish);
+  fill: var(--bullish);
+}
+.wave-negative {
+  stroke: var(--bearish);
+  fill: var(--bearish);
+}
+
+.analytics-wrapper {
+  max-width: 800px;   /* ✅ constrain width */
+  margin: 0 auto;     /* center horizontally */
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--panel);
+  border-radius: 8px;
+}
