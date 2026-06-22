@@ -1,15 +1,14 @@
 import React from "react";
 import { theme } from "../../theme";
 import { useLogStore } from "../Notification/logStore";
+import type { BiasPoint } from "../Strength_meter/csm_types";
 
-export interface BiasPoint {
-  mode: string;
-  bias?: number;
-}
+export const ScalpVerdict: React.FC<{ timeline: BiasPoint[]; symbol: string }> = ({
+  timeline,
+  symbol,
+}) => {
+  const logEvent = useLogStore((s) => s.logEvent);
 
-const logEvent = useLogStore.getState().logEvent;
-
-export const ScalpVerdict: React.FC<{ timeline: BiasPoint[] }> = ({ timeline }) => {
   const scalp = React.useMemo(
     () => [...timeline].reverse().find((p) => p.mode === "scalp"),
     [timeline]
@@ -39,7 +38,7 @@ export const ScalpVerdict: React.FC<{ timeline: BiasPoint[] }> = ({ timeline }) 
     if (previousDirection.current && previousDirection.current !== direction) {
       logEvent({
         type: "notification",
-        symbol: "XAUUSD_i", // or pass as prop
+        symbol,
         severity: "info",
         message: `ScalpVerdict flipped from ${previousDirection.current} to ${direction}`,
         context: {
@@ -49,9 +48,8 @@ export const ScalpVerdict: React.FC<{ timeline: BiasPoint[] }> = ({ timeline }) 
         },
       });
     }
-
     previousDirection.current = direction;
-  }, [direction]);
+  }, [direction, symbol, scalp?.bias, logEvent]);
 
   return (
     <div
@@ -81,4 +79,3 @@ export const ScalpVerdict: React.FC<{ timeline: BiasPoint[] }> = ({ timeline }) 
     </div>
   );
 };
-

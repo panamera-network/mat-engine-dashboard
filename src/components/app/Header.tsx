@@ -27,6 +27,7 @@ const Header: React.FC = () => {
         color: theme.colors.accentBlue,
         borderBottom: `1px solid ${theme.colors.grid}`,
         position: "relative",
+        flexShrink: 0,
       }}
     >
       <div style={{ fontWeight: 600 }}>Mat-AI Engine Dashboard</div>
@@ -53,14 +54,6 @@ const Header: React.FC = () => {
         onMouseLeave={(e) => {
           e.currentTarget.style.color = theme.colors.text;
           e.currentTarget.style.borderColor = theme.colors.grid;
-        }}
-        onFocus={(e) => {
-          e.currentTarget.style.borderColor = theme.colors.accentBlue;
-          e.currentTarget.style.boxShadow = `0 0 6px ${theme.colors.accentBlue}`;
-        }}
-        onBlur={(e) => {
-          e.currentTarget.style.borderColor = theme.colors.grid;
-          e.currentTarget.style.boxShadow = "none";
         }}
       >
         {themeMode === "dark"

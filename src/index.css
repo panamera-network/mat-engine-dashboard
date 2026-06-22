@@ -13,6 +13,19 @@ body {
   margin: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: #0f1218;
+  color: #e7ebf3;
+}
+
+/* Theme variants — toggled via Header data-theme attribute */
+body[data-theme="dim"] {
+  background: #12151c;
+  color: #d8dee9;
+}
+
+body[data-theme="light"] {
+  background: #f0f2f5;
+  color: #1a1d23;
 }
 
 /* index.css */

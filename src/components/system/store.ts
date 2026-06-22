@@ -3,11 +3,12 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import type { BiasPoint, Mode, Strength } from "../Strength_meter/csm_types";
 import { calculateCurrencyStrengthFromFeed } from "../Strength_meter/calculate_strength";
-import { classifyPulse, theme } from "../../theme";
+import { classifyPulseIntensity, theme } from "../../theme";
 import { calcAvgVolume, calcCCI, calcVolatility, type Candle } from "../indicators";
 import type { AuditEvent } from "../InstrumentStrip/AuditTrail";
 import type { Level } from "../InstrumentStrip/LiquidityHeatmapStrip";
 import { pushNarrative } from "../Notification/pushNarrative";
+import { feedLookupKey } from "../../lib/symbolUtils";
 
 interface Tick {
   symbol: string;
@@ -39,6 +40,10 @@ export interface StoreState {
 
   selectedSymbol: string;
   setSelectedSymbol: (sym: string) => void;
+  resolvedSymbol: string;
+  setResolvedSymbol: (sym: string) => void;
+  isResolvingSymbol: boolean;
+  setIsResolvingSymbol: (v: boolean) => void;
   selectedTimeframe: Timeframe;
   setSelectedTimeframe: (tf: Timeframe) => void;
 
@@ -91,7 +96,15 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
     setWsTickStatus: (status) => set({ wsTickStatus: status }),
 
     selectedSymbol: "XAUUSD",
-    setSelectedSymbol: (sym) => set({ selectedSymbol: sym }),
+    setSelectedSymbol: (sym) => {
+      set({ selectedSymbol: sym });
+      get().triggerPulse("bias", 0.6, theme.colors.accentBlue);
+    },
+
+    resolvedSymbol: "",
+    setResolvedSymbol: (sym) => set({ resolvedSymbol: sym }),
+    isResolvingSymbol: false,
+    setIsResolvingSymbol: (v) => set({ isResolvingSymbol: v }),
 
     selectedTimeframe: (() => {
       try {
@@ -125,7 +138,7 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
 
 
     triggerPulse: (id, intensity = 0.5, color = theme.colors.accentBlue) => {
-      const { glow } = classifyPulse(intensity);
+      const { glow } = classifyPulseIntensity(intensity);
       set((state) => {
         const prev = state.pulses[id] ?? [];
         return {
@@ -140,8 +153,7 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
     setFeed: (feed) => {
       const mode = get().mode;
       const strengths = calculateCurrencyStrengthFromFeed(feed, mode);
-      const symbol = get().selectedSymbol;
-      
+      const symbol = feedLookupKey(get().selectedSymbol, feed);
 
       set((state) => ({
         feed,
@@ -151,21 +163,21 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
         auditTrail: feed.auditTrail ?? state.auditTrail,
         volatilityHistory: {
           ...state.volatilityHistory,
-          [symbol]: feed[symbol]?.volatilityHistory ?? [],
+          [symbol]: feed[symbol]?.volatilityHistory ?? state.volatilityHistory[symbol] ?? [],
         },
         riskDistance: feed[symbol]?.risk ?? state.riskDistance,
         rewardDistance: feed[symbol]?.reward ?? state.rewardDistance,
         trendSlope: {
           ...state.trendSlope,
           [symbol]: {
-            short: feed[symbol]?.trendShort ?? 0,
-            mid: feed[symbol]?.trendMid ?? 0,
-            long: feed[symbol]?.trendLong ?? 0,
+            short: feed[symbol]?.trendShort ?? state.trendSlope[symbol]?.short ?? 0,
+            mid: feed[symbol]?.trendMid ?? state.trendSlope[symbol]?.mid ?? 0,
+            long: feed[symbol]?.trendLong ?? state.trendSlope[symbol]?.long ?? 0,
           },
         },
         liquidityLevels: {
           ...state.liquidityLevels,
-          [symbol]: feed[symbol]?.liquidityLevels ?? [],
+          [symbol]: feed[symbol]?.liquidityLevels ?? state.liquidityLevels[symbol] ?? [],
         },
       }));
 
@@ -175,6 +187,8 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
       const color = avg > 0 ? theme.colors.green : avg < 0 ? theme.colors.red : theme.colors.amber;
 
       get().triggerPulse("currency", intensity, color);
+      get().triggerPulse("bias", Math.min(1, intensity + 0.2), theme.colors.accentBlue);
+      get().triggerPulse("correlation", 0.5, theme.colors.amber);
     },
 
     setMode: (mode) => {
@@ -203,22 +217,21 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
         const next = [...prev, tick].slice(-1000);
 
         const prices = next.map((t) => t.price);
-        const mean = prices.reduce((sum, p) => sum + p, 0) / (prices.length || 1);
-        const variance = prices.reduce((sum, p) => sum + (p - mean) ** 2, 0) / (prices.length || 1);
-        const volatility = Math.sqrt(variance);
-
         const momentumSeries = state.momentum[tick.symbol] ?? [];
         const newMomentum = prices.length > 1 ? prices[prices.length - 1] - prices[0] : 0;
         const updatedSeries = [...momentumSeries, newMomentum].slice(-60);
 
-        const intensity = Math.min(1, volatility / 100);
-        const color = newMomentum > 0 ? theme.colors.green : newMomentum < 0 ? theme.colors.red : theme.colors.amber;
+        const intensity = Math.min(1, Math.abs(newMomentum) / 100);
+        const color =
+          newMomentum > 0 ? theme.colors.green :
+          newMomentum < 0 ? theme.colors.red :
+          theme.colors.amber;
 
         get().triggerPulse("volatility", intensity, color);
+        get().triggerPulse("market", Math.min(1, intensity + 0.1), color);
 
         return {
           ticks: { ...state.ticks, [tick.symbol]: next },
-          volatility: { ...state.volatility, [tick.symbol]: volatility },
           momentum: { ...state.momentum, [tick.symbol]: updatedSeries },
         };
       }),
@@ -259,6 +272,7 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
       set({ profiles, activeProfile: name });
       localStorage.setItem("profiles", JSON.stringify(profiles));
       localStorage.setItem("activeProfile", name);
+      get().triggerPulse("multiTimeframe", 0.5, theme.colors.accentBlue);
     },
   deleteProfile: (name) => {
     const { profiles } = get();

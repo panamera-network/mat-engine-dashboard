@@ -3,41 +3,54 @@ import ForceGraph2D from "react-force-graph-2d";
 import { transformCorrelationGraph } from "./correlationData";
 import { useStore } from "../system/store";
 import { theme } from "../../theme";
+import { feedLookupKey } from "../../lib/symbolUtils";
+
+const FOCUS_OPTIONS = ["XAUUSD_i", "WTIUSD_i", "USDJPY_i", "BTCUSD_i"];
+
+const LABEL_MAP: Record<string, string> = {
+  XAUUSD_i: "Gold",
+  WTIUSD_i: "Crude Oil",
+  USDJPY_i: "USD/JPY",
+  BTCUSD_i: "Bitcoin",
+};
 
 const CorrelationClusters: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ width: 400, height: 400 });
 
+  const selectedSymbol = useStore((s) => s.selectedSymbol);
+  const rawBiasData = useStore((s) => s.rawBiasData) ?? {};
+
+  const syncedFocus = useMemo(
+    () => feedLookupKey(selectedSymbol, rawBiasData),
+    [selectedSymbol, rawBiasData]
+  );
+
+  const [focusSymbol, setFocusSymbol] = useState(syncedFocus);
+
   useEffect(() => {
-    if (containerRef.current) {
-      const resize = () => {
-        setDims({
-          width: containerRef.current!.offsetWidth,
-          height: containerRef.current!.offsetHeight,
-        });
-      };
-      resize();
-      window.addEventListener("resize", resize);
-      return () => window.removeEventListener("resize", resize);
-    }
+    setFocusSymbol(syncedFocus);
+  }, [syncedFocus]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const resize = () => {
+      setDims({
+        width: containerRef.current!.offsetWidth,
+        height: containerRef.current!.offsetHeight,
+      });
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
   }, []);
 
-  const [focusSymbol, setFocusSymbol] = useState("XAUUSD_i");
-  const rawBiasData = useStore((s) => s.rawBiasData) ?? {};
   const graphData = useMemo(
     () => transformCorrelationGraph(rawBiasData, focusSymbol),
     [rawBiasData, focusSymbol]
   );
 
-  const focusOptions = ["XAUUSD_i", "WTIUSD_i", "USDJPY_i", "BTCUSD_i"];
-  const labelMap: Record<string, string> = {
-    XAUUSD_i: "Gold",
-    WTIUSD_i: "Crude Oil",
-    USDJPY_i: "USD/JPY",
-    BTCUSD_i: "Bitcoin",
-  };
-
-  const displayLabel = labelMap[focusSymbol] ?? focusSymbol;
+  const displayLabel = LABEL_MAP[focusSymbol] ?? focusSymbol;
 
   if (!graphData.nodes.length) {
     return (
@@ -61,7 +74,7 @@ const CorrelationClusters: React.FC = () => {
       style={{
         width: "100%",
         height: "380px",
-        border: ` ${theme.colors.grid}`,
+        border: `1px solid ${theme.colors.grid}`,
         borderRadius: 4,
         backgroundColor: theme.colors.panel,
         padding: 8,
@@ -76,8 +89,8 @@ const CorrelationClusters: React.FC = () => {
           marginBottom: 8,
         }}
       >
-        <h3 style={{ color: theme.colors.amber, fontWeight: "bold" }}>
-           {displayLabel}
+        <h3 style={{ color: theme.colors.amber, fontWeight: "bold", margin: 0 }}>
+          {displayLabel}
         </h3>
         <select
           value={focusSymbol}
@@ -91,7 +104,7 @@ const CorrelationClusters: React.FC = () => {
             borderRadius: 4,
           }}
         >
-          {focusOptions.map((sym) => (
+          {FOCUS_OPTIONS.map((sym) => (
             <option key={sym} value={sym}>
               Focus: {sym}
             </option>
@@ -106,22 +119,22 @@ const CorrelationClusters: React.FC = () => {
         height={dims.height}
         nodeLabel="label"
         nodeAutoColorBy="group"
-        linkColor={(link: any) =>
+        linkColor={(link: { value: number }) =>
           link.value > 0 ? theme.colors.green : theme.colors.red
         }
-        linkWidth={(link: any) => (Math.abs(link.value) > 0.8 ? 5 : 2)}
-        linkDirectionalParticles={(link: any) =>
+        linkWidth={(link: { value: number }) => (Math.abs(link.value) > 0.8 ? 5 : 2)}
+        linkDirectionalParticles={(link: { value: number }) =>
           Math.abs(link.value) > 0.8 ? 4 : 2
         }
-        linkDirectionalParticleSpeed={(link: any) =>
+        linkDirectionalParticleSpeed={(link: { value: number }) =>
           Math.abs(link.value) * 0.01
         }
         nodeCanvasObject={(
-          node: any,
+          node: { x?: number; y?: number; label?: string; color?: string },
           ctx: CanvasRenderingContext2D,
           globalScale: number
         ) => {
-          const label = node.label;
+          const label = node.label ?? "";
           const fontSize = 12 / globalScale;
           ctx.beginPath();
           ctx.arc(node.x!, node.y!, 6, 0, 2 * Math.PI, false);

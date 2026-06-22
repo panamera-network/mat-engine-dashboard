@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createChart,
   ColorType,
@@ -11,6 +11,9 @@ import type {
   BarData,
 } from "lightweight-charts";
 import { theme } from "../../theme";
+import { coerceToSeconds, normalizeTimeframe, toCandleTime } from "./chartUtils";
+import { useStore } from "../system/store";
+import type { Candle as IndicatorCandle } from "../indicators";
 
 interface Tick {
   symbol: string;
@@ -35,29 +38,6 @@ interface LiveChartProps {
 
 type Candle = CandlestickData<UTCTimestamp>;
 
-function normalizeTimeframe(tf: string): number {
-  const lower = tf.toLowerCase().trim();
-  if (lower.endsWith("m")) return parseInt(lower.replace("m", ""), 10);
-  if (lower.endsWith("h")) return parseInt(lower.replace("h", ""), 10) * 60;
-  if (lower.endsWith("d")) return parseInt(lower.replace("d", ""), 10) * 1440;
-  const parsed = parseInt(lower, 10);
-  return isNaN(parsed) ? 1 : parsed;
-}
-
-function coerceToSeconds(raw: any): number {
-  if (raw == null) return 0;
-  if (typeof raw === "number") return raw > 1e12 ? Math.floor(raw / 1000) : Math.floor(raw);
-  if (typeof raw === "string") return Math.floor(new Date(raw).getTime() / 1000);
-  if (typeof raw === "object") {
-    if ("seconds" in raw) return Math.floor(Number(raw.seconds));
-    if ("epoch" in raw) return Math.floor(Number(raw.epoch));
-    if (typeof raw.valueOf === "function") return Math.floor(Number(raw.valueOf()));
-  }
-  return 0;
-}
-
-let currentCandle: Candle | null = null;
-
 const LiveChart: React.FC<LiveChartProps> = ({
   baseSymbol,
   timeframe,
@@ -69,18 +49,38 @@ const LiveChart: React.FC<LiveChartProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const currentCandleRef = useRef<Candle | null>(null);
+  const lastTickCountRef = useRef(0);
 
-  const [overlayOHLC, setOverlayOHLC] = useState<{ open: number; high: number; low: number; close: number } | null>(null);
-  const [isLive, setIsLive] = useState<boolean>(true);
+  const [overlayOHLC, setOverlayOHLC] = useState<{
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  } | null>(null);
+  const [isLive, setIsLive] = useState(true);
   const [liveDotPos, setLiveDotPos] = useState<{ x: number; y: number } | null>(null);
+
+  const updateLiveDotPosition = useCallback(() => {
+    const candle = currentCandleRef.current;
+    if (!chartRef.current || !seriesRef.current || !candle) return;
+    const x = chartRef.current
+      .timeScale()
+      .timeToCoordinate(candle.time as UTCTimestamp);
+    const y = seriesRef.current.priceToCoordinate(candle.close);
+    if (x != null && y != null) setLiveDotPos({ x, y });
+  }, []);
 
   // Create chart + seed with history
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!baseSymbol || !containerRef.current) return;
 
-    chartRef.current = createChart(containerRef.current, {
-      width: width ?? containerRef.current.clientWidth,
-      height: height ?? (containerRef.current.clientHeight || 500),
+    const container = containerRef.current;
+    const abort = new AbortController();
+
+    const chart = createChart(container, {
+      width: width ?? container.clientWidth,
+      height: height ?? (container.clientHeight || 500),
       layout: {
         background: { type: ColorType.Solid, color: theme.colors.bg },
         textColor: theme.colors.text,
@@ -105,145 +105,168 @@ const LiveChart: React.FC<LiveChartProps> = ({
           labelBackgroundColor: theme.colors.panelAlt,
         },
       },
-      timeScale: {
-        timeVisible: true,
-        borderColor: theme.colors.grid,
-      },
-      rightPriceScale: {
-        borderColor: theme.colors.grid,
-      },
+      timeScale: { timeVisible: true, borderColor: theme.colors.grid },
+      rightPriceScale: { borderColor: theme.colors.grid },
     });
 
-    seriesRef.current = chartRef.current.addSeries(CandlestickSeries, {
+    chartRef.current = chart;
+
+    const series = chart.addSeries(CandlestickSeries, {
       upColor: theme.colors.green,
       downColor: theme.colors.red,
       borderVisible: false,
       wickUpColor: theme.colors.green,
       wickDownColor: theme.colors.red,
     });
+    seriesRef.current = series;
 
     const tfMinutes = normalizeTimeframe(timeframe);
-    const url = `http://localhost:8000/api/mt5/history?symbol=${encodeURIComponent(
-      baseSymbol
-    )}&timeframe=${tfMinutes}&bars=500`;
+    const url = `/api/mt5/history?symbol=${encodeURIComponent(baseSymbol)}&timeframe=${tfMinutes}&bars=500`;
 
-    fetch(url)
+    fetch(url, { signal: abort.signal })
       .then((res) => res.json())
-      .then((bars: any[]) => {
-        const mapped = (bars ?? []).map((b) => {
-          const t = coerceToSeconds(b.time ?? b.timestamp) as number;
-          const safeTime = Number(t) as UTCTimestamp;
-          return {
-            time: safeTime,
+      .then((bars: unknown) => {
+        if (!seriesRef.current || abort.signal.aborted) return;
+        if (!Array.isArray(bars)) {
+          console.warn("Invalid history payload for", baseSymbol);
+          return;
+        }
+
+        const mapped: Candle[] = bars
+          .map((b: Record<string, unknown>) => ({
+            time: coerceToSeconds(b.time ?? b.timestamp) as UTCTimestamp,
             open: Number(b.open),
             high: Number(b.high),
             low: Number(b.low),
             close: Number(b.close),
-          };
+          }))
+          .filter((c) => Number.isFinite(c.time) && c.time > 0)
+          .sort((a, b) => Number(a.time) - Number(b.time));
+
+        if (!mapped.length) return;
+
+        series.setData(mapped);
+        currentCandleRef.current = { ...mapped[mapped.length - 1] };
+        lastTickCountRef.current = 0;
+        chart.timeScale().fitContent();
+
+        const last = currentCandleRef.current;
+        setOverlayOHLC({ open: last.open, high: last.high, low: last.low, close: last.close });
+        setIsLive(true);
+        updateLiveDotPosition();
+
+        onStatsUpdate?.({
+          name: baseSymbol,
+          ohlc: { open: last.open, high: last.high, low: last.low, close: last.close },
+          lastUpdate: "latest",
         });
 
-        if (mapped.length) {
-          seriesRef.current?.setData(mapped);
-          currentCandle = mapped[mapped.length - 1];
-          chartRef.current?.timeScale().fitContent();
-
-          setOverlayOHLC({ ...currentCandle });
-          setIsLive(true);
-          updateLiveDotPosition();
-
-          onStatsUpdate?.({
-            name: baseSymbol,
-            ohlc: { ...currentCandle },
-            lastUpdate: "latest",
-          });
-        }
+        const indicatorCandles: IndicatorCandle[] = bars.map((b: Record<string, unknown>) => ({
+          high: Number(b.high),
+          low: Number(b.low),
+          close: Number(b.close),
+          volume: Number(b.volume ?? b.tick_volume ?? 0),
+        }));
+        useStore.getState().updateIndicators(baseSymbol, indicatorCandles);
       })
-      .catch((err) => console.error("⚠️ History fetch error", err));
+      .catch((err) => {
+        if (!abort.signal.aborted) console.error("History fetch error:", err);
+      });
 
-    chartRef.current.subscribeCrosshairMove((param) => {
-      if (!param || !param.time || !seriesRef.current) {
+    chart.subscribeCrosshairMove((param) => {
+      if (!param?.time || !seriesRef.current) {
         setIsLive(true);
         return;
       }
-      const data = param.seriesData.get(seriesRef.current) as BarData<UTCTimestamp> | undefined;
+      const data = param.seriesData.get(seriesRef.current) as
+        | BarData<UTCTimestamp>
+        | undefined;
       if (data) {
         setIsLive(false);
-        setOverlayOHLC({ open: data.open, high: data.high, low: data.low, close: data.close });
+        setOverlayOHLC({
+          open: data.open,
+          high: data.high,
+          low: data.low,
+          close: data.close,
+        });
       }
     });
 
-    const ro = new ResizeObserver(() => {
-      updateLiveDotPosition();
-    });
-    ro.observe(containerRef.current);
+    const ro = new ResizeObserver(() => updateLiveDotPosition());
+    ro.observe(container);
 
     return () => {
+      abort.abort();
       ro.disconnect();
-      chartRef.current?.remove();
+      chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
-      currentCandle = null;
+      currentCandleRef.current = null;
+      lastTickCountRef.current = 0;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseSymbol, timeframe]);
+  }, [baseSymbol, timeframe, width, height, onStatsUpdate, updateLiveDotPosition]);
 
-  // Merge ticks into current candle
+  // Merge only NEW ticks into the current candle
   useEffect(() => {
-    if (!seriesRef.current || !ticks.length) return;
+    if (!seriesRef.current || !baseSymbol || ticks.length === 0) return;
 
-    const tfMinutes = normalizeTimeframe(timeframe);
-    const tfSeconds = tfMinutes * 60;
+    const startIdx = lastTickCountRef.current;
+    if (startIdx >= ticks.length) return;
 
-    ticks.forEach((tick) => {
+    const tfSeconds = normalizeTimeframe(timeframe) * 60;
+    const newTicks = ticks.slice(startIdx);
+    lastTickCountRef.current = ticks.length;
+
+    for (const tick of newTicks) {
       const price = Number(tick.price);
-      if (!Number.isFinite(price) || price <= 0) return;
+      if (!Number.isFinite(price) || price <= 0) continue;
 
       const tickTime = coerceToSeconds(tick.time);
-      if (!Number.isFinite(tickTime) || tickTime <= 0) return;
+      if (!Number.isFinite(tickTime) || tickTime <= 0) continue;
 
-      const candleTime = Math.floor(tickTime / tfSeconds) * tfSeconds;
-      const safeTime = Number(candleTime) as UTCTimestamp;
+      const safeTime = toCandleTime(tickTime, tfSeconds);
+      let candle = currentCandleRef.current;
 
-      if (!currentCandle || safeTime > currentCandle.time) {
-        if (currentCandle) {
-          setOverlayOHLC({ ...currentCandle });
-          setIsLive(true);
-          onStatsUpdate?.({
-            name: baseSymbol,
-            ohlc: { ...currentCandle },
-            lastUpdate: "latest",
-          });
+      try {
+        if (!candle || safeTime > candle.time) {
+          candle = { time: safeTime, open: price, high: price, low: price, close: price };
+          seriesRef.current.update(candle);
+        } else if (safeTime === candle.time) {
+          candle = {
+            ...candle,
+            high: Math.max(candle.high, price),
+            low: Math.min(candle.low, price),
+            close: price,
+          };
+          seriesRef.current.update(candle);
+        } else {
+          continue;
         }
-        currentCandle = { time: safeTime, open: price, high: price, low: price, close: price };
-        seriesRef.current?.update(currentCandle);
-      } else if (safeTime === currentCandle.time) {
-        currentCandle.high = Math.max(currentCandle.high, price);
-        currentCandle.low = Math.min(currentCandle.low, price);
-        currentCandle.close = price;
-        seriesRef.current?.update(currentCandle);
+      } catch (err) {
+        console.warn("series.update skipped:", err);
+        continue;
       }
 
-      setOverlayOHLC({ ...currentCandle });
+      currentCandleRef.current = candle;
+      setOverlayOHLC({ open: candle.open, high: candle.high, low: candle.low, close: candle.close });
       setIsLive(true);
       updateLiveDotPosition();
 
       onStatsUpdate?.({
         name: baseSymbol,
-        ohlc: { ...currentCandle },
+        ohlc: { open: candle.open, high: candle.high, low: candle.low, close: candle.close },
         lastUpdate: "latest",
       });
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticks]);
-
-  const updateLiveDotPosition = () => {
-    if (!chartRef.current || !seriesRef.current || !currentCandle) return;
-    const x = chartRef.current.timeScale().timeToCoordinate(currentCandle.time as UTCTimestamp);
-    const y = seriesRef.current.priceToCoordinate(currentCandle.close);
-    if (x != null && y != null) {
-      setLiveDotPos({ x, y });
     }
-  };
+  }, [ticks, timeframe, baseSymbol, onStatsUpdate, updateLiveDotPosition]);
+
+  if (!baseSymbol) {
+    return (
+      <div style={{ padding: 16, color: theme.colors.textDim, fontSize: 13 }}>
+        Waiting for symbol…
+      </div>
+    );
+  }
 
   return (
     <div
@@ -254,7 +277,6 @@ const LiveChart: React.FC<LiveChartProps> = ({
         height: height ? `${height}px` : "100%",
       }}
     >
-      {/* OHLC Overlay */}
       {overlayOHLC && (
         <div
           style={{
@@ -274,13 +296,7 @@ const LiveChart: React.FC<LiveChartProps> = ({
           }}
         >
           {isLive && (
-            <span
-              style={{
-                color: theme.colors.green,
-                fontWeight: 600,
-                marginRight: 6,
-              }}
-            >
+            <span style={{ color: theme.colors.green, fontWeight: 600, marginRight: 6 }}>
               ● LIVE
             </span>
           )}
@@ -304,7 +320,6 @@ const LiveChart: React.FC<LiveChartProps> = ({
         </div>
       )}
 
-      {/* Live Candle Dot */}
       {isLive && liveDotPos && (
         <div
           style={{

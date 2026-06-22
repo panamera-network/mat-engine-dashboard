@@ -11,5 +11,6 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src", "utils", "src/logic"]
+  "include": ["src", "utils", "src/logic"],
+  "exclude": ["src/_archive"]
 }

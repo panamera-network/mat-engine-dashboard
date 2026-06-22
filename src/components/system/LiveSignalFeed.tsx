@@ -1,17 +1,15 @@
 // LiveSignalFeed.tsx
 import { useEffect, useRef } from "react";
 import { useStore } from "./store";
-
+import { feedLookupKey } from "../../lib/symbolUtils";
 
 export function LiveSignalFeed() {
   const setFeed = useStore((s) => s.setFeed);
   const addBiasPoint = useStore((s) => s.addBiasPoint);
-  const selectedSymbol = useStore((s) => s.selectedSymbol);
-  const mode = useStore((s) => s.mode);
   const wsRef = useRef<WebSocket | null>(null);
   const setWsBiasStatus = useStore.getState().setWsBiasStatus;
 
-
+  // Bias WebSocket — connect once, do not reconnect on symbol change
   useEffect(() => {
     const wsBase = import.meta.env.VITE_WS_URL;
     let reconnectTimer: ReturnType<typeof setTimeout>;
@@ -24,7 +22,7 @@ export function LiveSignalFeed() {
 
       ws.onopen = () => {
         console.log("[LiveSignalFeed] Connected to WS");
-        setWsBiasStatus("connected"); // 🟢
+        setWsBiasStatus("connected");
       };
 
       ws.onmessage = (event) => {
@@ -32,16 +30,17 @@ export function LiveSignalFeed() {
           const feed = JSON.parse(event.data);
           setFeed(feed);
 
-          // --- Derive BiasPoint for selected symbol ---
+          const { selectedSymbol, mode } = useStore.getState();
+          const symbol = feedLookupKey(selectedSymbol, feed);
+
           const sectionMap: Record<"scalping" | "swing" | "blend", string> = {
             scalping: "scalping",
             swing: "swing",
             blend: "bias",
           };
           const section = sectionMap[mode];
-          const tfData = feed[selectedSymbol]?.[section] || {};
+          const tfData = feed[symbol]?.[section] || {};
 
-          // Timeframes per mode
           const tfs =
             mode === "scalping"
               ? ["M1", "M5", "M15", "M30"]
@@ -65,14 +64,13 @@ export function LiveSignalFeed() {
           if (count > 0) {
             const avgBias = biasVal / count;
             const avgConf = confVal / count;
+            const escalations = feed[symbol]?.escalations || [];
 
-            const escalations = feed[selectedSymbol]?.escalations || [];
-
-            addBiasPoint(selectedSymbol, {
+            addBiasPoint(symbol, {
               ts: Date.now(),
-              bias: Math.max(-1, Math.min(1, avgBias / 100)), // normalize -1..+1
-              confidence: Math.min(100, Math.max(0, avgConf)), // clamp 0–100
-              mode: mode === "scalping" ? "scalp" : "swing",   // ✅ map global mode
+              bias: Math.max(-1, Math.min(1, avgBias / 100)),
+              confidence: Math.min(100, Math.max(0, avgConf)),
+              mode: mode === "scalping" ? "scalp" : "swing",
               escalations,
             });
           }
@@ -83,13 +81,13 @@ export function LiveSignalFeed() {
 
       ws.onclose = () => {
         console.warn("[LiveSignalFeed] Connection closed, retrying in 5s...");
-        setWsBiasStatus("disconnected"); // 🔴
+        setWsBiasStatus("disconnected");
         reconnectTimer = setTimeout(connect, 5000);
       };
 
       ws.onerror = (err) => {
         console.error("[LiveSignalFeed] WebSocket error:", err);
-        setWsBiasStatus("disconnected"); // 🔴
+        setWsBiasStatus("disconnected");
         ws.close();
       };
     };
@@ -100,7 +98,7 @@ export function LiveSignalFeed() {
       clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, [setFeed, addBiasPoint, selectedSymbol, mode]);
+  }, [setFeed, addBiasPoint]);
 
   return null;
 }

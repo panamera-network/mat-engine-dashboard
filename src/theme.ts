@@ -95,7 +95,8 @@ export const theme = {
 
 };
 
-export function classifyPulse(intensity: number) {
+/** Glow sizing from numeric intensity (0–1) — used by Zustand store pulses */
+export function classifyPulseIntensity(intensity: number) {
   if (intensity >= theme.pulse.critical.min) return { level: "critical", glow: theme.pulse.critical.glow };
   if (intensity >= theme.pulse.medium.min) return { level: "medium", glow: theme.pulse.medium.glow };
   return { level: "soft", glow: theme.pulse.soft.glow };

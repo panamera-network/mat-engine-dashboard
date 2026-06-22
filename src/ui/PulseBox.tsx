@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { theme } from "../theme";
 import { onPulse } from "./pulseBus";
-import { classifyPulse } from "./classifyPulse";
+import { classifyPulseTrigger } from "./classifyPulse";
 
 export interface Pulse {
   ts: number;
@@ -48,7 +48,7 @@ export const PulseBox: React.FC<{
 
 useEffect(() => {
   const unsubscribe = onPulse(({ trigger }) => {
-    const pulse = classifyPulse(trigger);
+    const pulse = classifyPulseTrigger(trigger);
 
     setPulses((prev) => [...prev, pulse]);
     setTimeout(() => {

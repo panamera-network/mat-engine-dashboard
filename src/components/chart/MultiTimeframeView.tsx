@@ -1,22 +1,17 @@
 import React, { useState } from "react";
 import LiveChart from "./LiveChart";
+import ErrorBoundary from "./ErrorBoundary";
 import { Panel } from "../../ui/Panel";
 import { useStore } from "../system/store";
 import PanelHeader from "./PanelHeader";
 import { theme } from "../../theme";
+import { useActiveSymbol } from "../../hooks/useActiveSymbol";
 
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d";
 
-interface MultiTimeframeViewProps {
-  symbols: string[];
-  wsConnected: boolean;
-}
-
-const MultiTimeframeView: React.FC<MultiTimeframeViewProps> = ({
-
-}) => {
-  const symbol = useStore((s) => s.selectedSymbol);
-  const ticks = useStore((s) => (symbol ? s.ticks[symbol] : undefined));
+const MultiTimeframeView: React.FC = () => {
+  const { selectedSymbol, chartSymbol, dataKey, isReady } = useActiveSymbol();
+  const ticks = useStore((s) => (dataKey ? s.ticks[dataKey] : undefined));
 
   const profiles = useStore((s) => s.profiles);
   const activeProfile = useStore((s) => s.activeProfile);
@@ -40,7 +35,7 @@ const MultiTimeframeView: React.FC<MultiTimeframeViewProps> = ({
   const removePanel = (index: number) =>
     saveProfile(activeProfile, timeframes.filter((_, i) => i !== index));
 
-  if (!symbol) {
+  if (!selectedSymbol) {
     return (
       <div style={{ color: theme.colors.textDim, fontSize: 13 }}>
         No symbol selected
@@ -48,11 +43,28 @@ const MultiTimeframeView: React.FC<MultiTimeframeViewProps> = ({
     );
   }
 
+  const chartReady = isReady && chartSymbol;
+
+  const renderChart = (tf: Timeframe, key: string) => (
+    <ErrorBoundary>
+      {chartReady ? (
+        <LiveChart
+          key={key}
+          baseSymbol={chartSymbol}
+          timeframe={tf}
+          ticks={ticks ?? []}
+          onStatsUpdate={() => {}}
+        />
+      ) : (
+        <div style={{ padding: 12, color: theme.colors.textDim, fontSize: 12 }}>
+          Resolving symbol…
+        </div>
+      )}
+    </ErrorBoundary>
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      
-
-      {/* Profile controls */}
       <div
         style={{
           display: "flex",
@@ -62,7 +74,6 @@ const MultiTimeframeView: React.FC<MultiTimeframeViewProps> = ({
           gap: theme.spacing.md,
         }}
       >
-        {/* Left side: profile selector + save/delete */}
         <div style={{ display: "flex", alignItems: "center", gap: theme.spacing.sm }}>
           <select
             value={activeProfile}
@@ -136,54 +147,44 @@ const MultiTimeframeView: React.FC<MultiTimeframeViewProps> = ({
           )}
         </div>
 
-        {/* Right side: add chart */}
-        <div>
-          <button
-            onClick={addPanel}
-            style={{
-              padding: "4px 8px",
-              border: `1px solid ${theme.colors.accentBlue}`,
-              borderRadius: theme.radius.sm,
-              background: "transparent",
-              color: theme.colors.accentBlue,
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
-            ➕ Add Chart
-          </button>
-        </div>
+        <button
+          onClick={addPanel}
+          style={{
+            padding: "4px 8px",
+            border: `1px solid ${theme.colors.accentBlue}`,
+            borderRadius: theme.radius.sm,
+            background: "transparent",
+            color: theme.colors.accentBlue,
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+        >
+          ➕ Add Chart
+        </button>
       </div>
 
       {fullscreenIndex !== null ? (
-        // ✅ Fullscreen single panel
         <div style={{ flex: 1, width: "100%", height: "80vh" }}>
           <Panel
             title={
               <PanelHeader
-                symbol={symbol}
+                symbol={selectedSymbol}
                 timeframe={timeframes[fullscreenIndex]}
                 available={available}
                 onTimeframeChange={(newTf) =>
                   updateTimeframe(fullscreenIndex, newTf as Timeframe)
                 }
                 onRemove={() => removePanel(fullscreenIndex)}
-                onToggleFullscreen={() => setFullscreenIndex(null)} // collapse
+                onToggleFullscreen={() => setFullscreenIndex(null)}
               />
             }
           >
             <div style={{ flex: 1, minHeight: 300, display: "flex" }}>
-              <LiveChart
-                baseSymbol={symbol}
-                timeframe={timeframes[fullscreenIndex]}
-                ticks={ticks ?? []}
-                onStatsUpdate={() => {}}
-              />
+              {renderChart(timeframes[fullscreenIndex], `fs-${chartSymbol}-${timeframes[fullscreenIndex]}`)}
             </div>
           </Panel>
         </div>
       ) : (
-        // ✅ Normal grid (no drag/drop)
         <div
           style={{
             display: "grid",
@@ -198,22 +199,17 @@ const MultiTimeframeView: React.FC<MultiTimeframeViewProps> = ({
               key={i}
               title={
                 <PanelHeader
-                  symbol={symbol}
+                  symbol={selectedSymbol}
                   timeframe={tf}
                   available={available}
                   onTimeframeChange={(newTf) => updateTimeframe(i, newTf as Timeframe)}
                   onRemove={() => removePanel(i)}
-                  onToggleFullscreen={() => setFullscreenIndex(i)} // expand
+                  onToggleFullscreen={() => setFullscreenIndex(i)}
                 />
               }
             >
               <div style={{ flex: 1, minHeight: 200, display: "flex" }}>
-                <LiveChart
-                  baseSymbol={symbol}
-                  timeframe={tf}
-                  ticks={ticks ?? []}
-                  onStatsUpdate={() => {}}
-                />
+                {renderChart(tf, `${chartSymbol}-${tf}-${i}`)}
               </div>
             </Panel>
           ))}

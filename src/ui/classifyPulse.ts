@@ -1,7 +1,8 @@
 import { theme } from "../theme";
 import type { Pulse } from "./PulseBox";
 
-export function classifyPulse(trigger: string): Pulse {
+/** Animation color/glow from trigger name — used by PulseBox via pulseBus */
+export function classifyPulseTrigger(trigger: string): Pulse {
   const ts = Date.now();
 
   switch (trigger) {

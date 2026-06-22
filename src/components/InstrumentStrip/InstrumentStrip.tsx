@@ -1,6 +1,7 @@
 import React from "react";
 import { theme } from "../../theme";
 import { useStore } from "../system/store";
+import { useActiveSymbol } from "../../hooks/useActiveSymbol";
 
 import { AuditTrail } from "./AuditTrail";
 import { ScalpVerdict } from "./ScalpVerdict";
@@ -15,23 +16,20 @@ import { TrendAlignmentGauge } from "./TrendAlignmentGauge";
 import { LiquidityHeatmapStrip } from "./LiquidityHeatmapStrip";
 
 export const InstrumentStrip: React.FC = () => {
-  
+  const { feedKey, dataKey } = useActiveSymbol();
 
-  const symbol = useStore((s) => s.selectedSymbol);
-const auditTrail = useStore((s) => s.auditTrail);
-const volatilityHistory = useStore((s) => s.volatilityHistory);
-const risk = useStore((s) => s.riskDistance);
-const reward = useStore((s) => s.rewardDistance);
-const trendSlope = useStore((s) => s.trendSlope);
-const liquidityLevels = useStore((s) => s.liquidityLevels);
-const biasTimeline = useStore((s) => s.biasTimeline);
+  const auditTrail = useStore((s) => s.auditTrail);
+  const volatilityHistory = useStore((s) => s.volatilityHistory);
+  const risk = useStore((s) => s.riskDistance);
+  const reward = useStore((s) => s.rewardDistance);
+  const trendSlope = useStore((s) => s.trendSlope);
+  const liquidityLevels = useStore((s) => s.liquidityLevels);
+  const biasTimeline = useStore((s) => s.biasTimeline);
 
-
-
-  const sparkPoints = volatilityHistory[symbol] ?? [];
-  const trend = trendSlope[symbol] ?? { short: 0, mid: 0, long: 0 };
-  const liquidity = liquidityLevels[symbol] ?? [];
-  const timeline = biasTimeline[symbol] ?? [];
+  const sparkPoints = volatilityHistory[feedKey] ?? volatilityHistory[dataKey] ?? [];
+  const trend = trendSlope[feedKey] ?? trendSlope[dataKey] ?? { short: 0, mid: 0, long: 0 };
+  const liquidity = liquidityLevels[feedKey] ?? liquidityLevels[dataKey] ?? [];
+  const timeline = biasTimeline[feedKey] ?? biasTimeline[dataKey] ?? [];
 
   const size = 200;
 
@@ -44,16 +42,9 @@ const biasTimeline = useStore((s) => s.biasTimeline);
         width: "100%",
       }}
     >
-      {/* 1. Audit Trail */}
       <AuditTrail events={auditTrail} />
-
-      {/* 2. Scalp Verdict */}
-      <ScalpVerdict timeline={timeline} />
-
-      {/* 3. Bias Confidence Timeline */}
-      <BiasConfidenceTimeline symbol={symbol} />
-
-      {/* 4. Volatility Sparkline + Momentum Waveform */}
+      <ScalpVerdict timeline={timeline} symbol={feedKey} />
+      <BiasConfidenceTimeline symbol={feedKey} />
       <div style={{ display: "flex", gap: theme.spacing.md, width: "100%" }}>
         <div style={{ flex: 1 }}>
           <VolatilitySparkline
@@ -72,8 +63,6 @@ const biasTimeline = useStore((s) => s.biasTimeline);
           <MomentumWaveform />
         </div>
       </div>
-
-      {/* 5. Volatility Meter + CCI Meter */}
       <div style={{ display: "flex", gap: theme.spacing.md, width: "100%" }}>
         <div style={{ flex: 1 }}>
           <VolatilityMeter size={size} />
@@ -82,8 +71,6 @@ const biasTimeline = useStore((s) => s.biasTimeline);
           <CCIMeter size={size} />
         </div>
       </div>
-
-      {/* 6. Volume Meter + Risk/Reward Meter */}
       <div style={{ display: "flex", gap: theme.spacing.md, width: "100%" }}>
         <div style={{ flex: 1 }}>
           <VolumeMeter size={size} />
@@ -92,8 +79,6 @@ const biasTimeline = useStore((s) => s.biasTimeline);
           <RiskRewardMeter risk={risk} reward={reward} size={size} />
         </div>
       </div>
-
-      {/* 7. Trend Alignment Gauge + Liquidity Heatmap Strip */}
       <div style={{ display: "flex", gap: theme.spacing.md, width: "100%" }}>
         <div style={{ flex: 1 }}>
           <TrendAlignmentGauge short={trend.short} mid={trend.mid} long={trend.long} />
