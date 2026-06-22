@@ -14,6 +14,9 @@ import { theme } from "../../theme";
 import { coerceToSeconds, normalizeTimeframe, toCandleTime } from "./chartUtils";
 import { useStore } from "../system/store";
 import type { Candle as IndicatorCandle } from "../indicators";
+import { INDICATOR_REGISTRY, type IndicatorKey } from "../../lib/indicators";
+import { DrawingTools } from "./DrawingTools";
+import { IndicatorSelector } from "./IndicatorSelector";
 
 interface Tick {
   symbol: string;
@@ -51,6 +54,7 @@ const LiveChart: React.FC<LiveChartProps> = ({
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const currentCandleRef = useRef<Candle | null>(null);
   const lastTickCountRef = useRef(0);
+  const candlesRef = useRef<Candle[]>([]);
 
   const [overlayOHLC, setOverlayOHLC] = useState<{
     open: number;
@@ -60,6 +64,8 @@ const LiveChart: React.FC<LiveChartProps> = ({
   } | null>(null);
   const [isLive, setIsLive] = useState(true);
   const [liveDotPos, setLiveDotPos] = useState<{ x: number; y: number } | null>(null);
+  const [selectedIndicators, setSelectedIndicators] = useState<Set<IndicatorKey>>(new Set());
+  const indicatorSeriesRef = useRef<Map<IndicatorKey, ISeriesApi<any>>>(new Map());
 
   const updateLiveDotPosition = useCallback(() => {
     const candle = currentCandleRef.current;
@@ -69,6 +75,24 @@ const LiveChart: React.FC<LiveChartProps> = ({
       .timeToCoordinate(candle.time as UTCTimestamp);
     const y = seriesRef.current.priceToCoordinate(candle.close);
     if (x != null && y != null) setLiveDotPos({ x, y });
+  }, []);
+
+  const handleToggleIndicator = useCallback((indicator: IndicatorKey) => {
+    setSelectedIndicators((prev) => {
+      const next = new Set(prev);
+      if (next.has(indicator)) {
+        next.delete(indicator);
+        // Remove series from chart
+        const series = indicatorSeriesRef.current.get(indicator);
+        if (series && chartRef.current) {
+          chartRef.current.removeSeries(series as any);
+          indicatorSeriesRef.current.delete(indicator);
+        }
+      } else {
+        next.add(indicator);
+      }
+      return next;
+    });
   }, []);
 
   // Create chart + seed with history
@@ -145,6 +169,7 @@ const LiveChart: React.FC<LiveChartProps> = ({
 
         if (!mapped.length) return;
 
+        candlesRef.current = mapped;
         series.setData(mapped);
         currentCandleRef.current = { ...mapped[mapped.length - 1] };
         lastTickCountRef.current = 0;
@@ -205,6 +230,53 @@ const LiveChart: React.FC<LiveChartProps> = ({
       lastTickCountRef.current = 0;
     };
   }, [baseSymbol, timeframe, width, height, onStatsUpdate, updateLiveDotPosition]);
+
+  // Render/remove indicators
+  useEffect(() => {
+    if (!chartRef.current || !candlesRef.current.length) return;
+
+    for (const indicator of selectedIndicators) {
+      if (indicatorSeriesRef.current.has(indicator)) continue; // Already rendered
+
+      try {
+        const config = INDICATOR_REGISTRY[indicator]();
+        let indicatorData: any;
+
+        if (config.params.length === 0) {
+          indicatorData = (config.fn as any)(candlesRef.current);
+        } else if (config.params.length === 1) {
+          indicatorData = (config.fn as any)(candlesRef.current, config.params[0]);
+        } else if (config.params.length === 2) {
+          indicatorData = (config.fn as any)(candlesRef.current, config.params[0], config.params[1]);
+        } else {
+          indicatorData = (config.fn as any)(candlesRef.current, config.params[0], config.params[1], config.params[2]);
+        }
+
+        // Only handle simple single-series indicators for now
+        if (!("data" in indicatorData)) {
+          console.warn(`[LiveChart] Indicator ${indicator} not yet supported`);
+          continue;
+        }
+
+        const series = (chartRef.current.addSeries as any)("Line" as any, {
+          color: indicatorData.color || theme.colors.text,
+          lineWidth: (indicatorData.lineWidth || 2) as any,
+          priceScaleId: "right",
+        });
+
+        // Convert IndicatorPoint to chart data format
+        const data = indicatorData.data.map((p: any) => ({
+          time: (p.time / 1000) as UTCTimestamp,
+          value: p.value,
+        }));
+
+        series.setData(data);
+        indicatorSeriesRef.current.set(indicator, series);
+      } catch (err) {
+        console.error(`[LiveChart] Failed to render indicator ${indicator}:`, err);
+      }
+    }
+  }, [selectedIndicators]);
 
   // Merge only NEW ticks into the current candle
   useEffect(() => {
@@ -270,72 +342,102 @@ const LiveChart: React.FC<LiveChartProps> = ({
 
   return (
     <div
-      ref={containerRef}
       style={{
-        position: "relative",
+        display: "flex",
+        flexDirection: "column",
         width: width ? `${width}px` : "100%",
         height: height ? `${height}px` : "100%",
       }}
     >
-      {overlayOHLC && (
-        <div
-          style={{
-            position: "absolute",
-            top: 8,
-            left: 8,
-            background: theme.colors.panelAlt,
-            border: `1px solid ${theme.colors.grid}`,
-            borderRadius: theme.radius.sm,
-            padding: "4px 8px",
-            fontSize: 12,
-            color: theme.colors.text,
-            display: "flex",
-            gap: 6,
-            alignItems: "center",
-            zIndex: 10,
-          }}
-        >
-          {isLive && (
-            <span style={{ color: theme.colors.green, fontWeight: 600, marginRight: 6 }}>
-              ● LIVE
-            </span>
-          )}
-          <span>
-            O: {overlayOHLC.open.toFixed(5)}, H: {overlayOHLC.high.toFixed(5)}, L:{" "}
-            {overlayOHLC.low.toFixed(5)},
-          </span>
-          <span
+      {/* Toolbar */}
+      <div
+        style={{
+          display: "flex",
+          gap: theme.spacing.sm,
+          padding: theme.spacing.sm,
+          borderBottom: `1px solid ${theme.colors.grid}`,
+          background: theme.colors.panel,
+          alignItems: "center",
+        }}
+      >
+        <IndicatorSelector
+          selectedIndicators={selectedIndicators}
+          onToggleIndicator={handleToggleIndicator}
+        />
+      </div>
+
+      {/* Chart container */}
+      <div
+        ref={containerRef}
+        style={{
+          position: "relative",
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
+        {/* Drawing tools overlay */}
+        <DrawingTools containerRef={containerRef as React.RefObject<HTMLDivElement>} />
+
+        {overlayOHLC && (
+          <div
             style={{
-              color:
-                overlayOHLC.close > overlayOHLC.open
-                  ? theme.colors.green
-                  : overlayOHLC.close < overlayOHLC.open
-                  ? theme.colors.red
-                  : theme.colors.textDim,
-              fontWeight: 600,
+              position: "absolute",
+              top: 8,
+              left: 8,
+              background: theme.colors.panelAlt,
+              border: `1px solid ${theme.colors.grid}`,
+              borderRadius: theme.radius.sm,
+              padding: "4px 8px",
+              fontSize: 12,
+              color: theme.colors.text,
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              zIndex: 10,
             }}
           >
-            C: {overlayOHLC.close.toFixed(5)}
-          </span>
-        </div>
-      )}
+            {isLive && (
+              <span style={{ color: theme.colors.green, fontWeight: 600, marginRight: 6 }}>
+                ● LIVE
+              </span>
+            )}
+            <span>
+              O: {overlayOHLC.open.toFixed(5)}, H: {overlayOHLC.high.toFixed(5)}, L:{" "}
+              {overlayOHLC.low.toFixed(5)},
+            </span>
+            <span
+              style={{
+                color:
+                  overlayOHLC.close > overlayOHLC.open
+                    ? theme.colors.green
+                    : overlayOHLC.close < overlayOHLC.open
+                    ? theme.colors.red
+                    : theme.colors.textDim,
+                fontWeight: 600,
+              }}
+            >
+              C: {overlayOHLC.close.toFixed(5)}
+            </span>
+          </div>
+        )}
 
-      {isLive && liveDotPos && (
-        <div
-          style={{
-            position: "absolute",
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: theme.colors.accentBlue,
-            boxShadow: `0 0 8px ${theme.colors.accentBlue}`,
-            transform: "translate(-50%, -50%)",
-            left: `${liveDotPos.x}px`,
-            top: `${liveDotPos.y}px`,
-            zIndex: 9,
-          }}
-        />
-      )}
+        {isLive && liveDotPos && (
+          <div
+            style={{
+              position: "absolute",
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: theme.colors.accentBlue,
+              boxShadow: `0 0 8px ${theme.colors.accentBlue}`,
+              transform: "translate(-50%, -50%)",
+              left: `${liveDotPos.x}px`,
+              top: `${liveDotPos.y}px`,
+              zIndex: 9,
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 };
