@@ -213,6 +213,37 @@ weren't one-off mistakes). Findings:
    audit — no TypeScript errors existed here (unlike the `D:` duplicate,
    which had 17).
 
+## Symbol selector + filtered engine output (2026-06-27)
+
+Added alongside the existing `LiveSignalFeed`/`TickStream` (which still
+fetch all 36 symbols continuously via websocket):
+- **`SymbolSelector.tsx`** — multi-select dropdown in the header. Fetches
+  the real symbol list from `GET /core/symbols` (via the `/core` proxy
+  rule added above). Selection persists to `localStorage`
+  (`selectedSymbols`), default `DEFAULT_SYMBOLS` in `store.ts` (`XAUUSD_i,
+  EURUSD_i, GBPUSD_i, USDJPY_i, USDCHF_i`). Changing selection keeps
+  `selectedSymbol` valid — falls back to the first selection if the
+  currently-shown symbol gets deselected.
+- **`EnginePoller.tsx`** (in `system/`) — POSTs `/core/output` with
+  `{symbols: selectedSymbols}` on mount, on selection change, and every
+  30s, via `api/engineClient.ts`. Drives `store.setFeed()`. Runs
+  *alongside* the websocket, not replacing it — `CurrencyMeter` needs full
+  symbol coverage to compute strength correctly, and filtering would
+  degrade that.
+- **`EngineStatus.tsx`** — small colored-dot + label in the header showing
+  loading / `"Engine offline"` on fetch failure / last-updated time, all
+  driven by `EnginePoller` via new `engineLoading`/`engineError`/
+  `engineLastUpdated` store fields.
+- **No mock strategy selector added** — this repo already has a real
+  `StrategyControl` (just-fixed, see "Live Audit Findings" above), so
+  there's no need for a placeholder. (A `D:` duplicate of this repo got a
+  10-mock-strategy `StrategySelector` during the same session, specifically
+  because *that* copy never had a real one — doesn't apply here.)
+
+Verified live through the dev server's `/core` proxy: `GET /core/symbols`
+and `POST /core/output` with a filtered `symbols` body both return real
+data.
+
 ## Configuration
 
 ### Environment Variables (.env)

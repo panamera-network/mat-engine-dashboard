@@ -1,6 +1,8 @@
 //header.tsx
 import React, { useState } from "react";
 import { theme } from "../../theme";
+import { SymbolSelector } from "../SymbolSelector";
+import { EngineStatus } from "../EngineStatus";
 
 const Header: React.FC = () => {
   const [themeMode, setThemeMode] = useState<"dark" | "light" | "dim">("dark");
@@ -30,6 +32,19 @@ const Header: React.FC = () => {
         flexShrink: 0,
       }}
     >
+      <div
+        style={{
+          position: "absolute",
+          left: 12,
+          display: "flex",
+          alignItems: "center",
+          gap: theme.spacing.sm,
+        }}
+      >
+        <SymbolSelector />
+        <EngineStatus />
+      </div>
+
       <div style={{ fontWeight: 600 }}>Mat-AI Engine Dashboard</div>
 
       <button

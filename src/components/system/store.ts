@@ -25,6 +25,8 @@ interface Pulse {
 
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d";
 
+export const DEFAULT_SYMBOLS = ["XAUUSD_i", "EURUSD_i", "GBPUSD_i", "USDJPY_i", "USDCHF_i"];
+
 // Derives short/mid/long trend slope from the real per-timeframe bias scores
 // in feed[symbol].bias (backend: BiasEngine score, roughly -10..+10). Replaces
 // reading feed[symbol].trendShort/Mid/Long, which never existed in the real
@@ -118,6 +120,18 @@ export interface StoreState {
   trendSlope: Record<string, { short: number; mid: number; long: number }>;
   liquidityLevels: Record<string, Level[]>;
 
+  // Which symbols the dashboard actually fetches from the engine via
+  // EnginePoller (a subset of all available, via POST /core/output) — keeps
+  // the request fast. selectedSymbol (above) is which ONE of these is shown
+  // in detail views.
+  selectedSymbols: string[];
+  setSelectedSymbols: (symbols: string[]) => void;
+
+  engineLoading: boolean;
+  engineError: string | null;
+  engineLastUpdated: Date | null;
+  setEngineStatus: (status: { loading?: boolean; error?: string | null; lastUpdated?: Date }) => void;
+
   updateIndicators: (symbol: string, candles: Candle[]) => void;
 
   lastBiasAlignment: Record<string, "bullish" | "bearish" | "neutral">;
@@ -147,6 +161,35 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
     setResolvedSymbol: (sym) => set({ resolvedSymbol: sym }),
     isResolvingSymbol: false,
     setIsResolvingSymbol: (v) => set({ isResolvingSymbol: v }),
+
+    selectedSymbols: (() => {
+      try {
+        const saved = localStorage.getItem("selectedSymbols");
+        return saved ? JSON.parse(saved) : DEFAULT_SYMBOLS;
+      } catch {
+        return DEFAULT_SYMBOLS;
+      }
+    })(),
+    setSelectedSymbols: (symbols) => {
+      localStorage.setItem("selectedSymbols", JSON.stringify(symbols));
+      set((state) => ({
+        selectedSymbols: symbols,
+        // Keep selectedSymbol valid — fall back to the first selection if
+        // the one currently shown in detail views got deselected.
+        selectedSymbol: symbols.includes(state.selectedSymbol)
+          ? state.selectedSymbol
+          : symbols[0] ?? state.selectedSymbol,
+      }));
+    },
+
+    engineLoading: false,
+    engineError: null,
+    engineLastUpdated: null,
+    setEngineStatus: (status) => set((state) => ({
+      engineLoading: status.loading ?? state.engineLoading,
+      engineError: status.error === undefined ? state.engineError : status.error,
+      engineLastUpdated: status.lastUpdated ?? state.engineLastUpdated,
+    })),
 
     selectedTimeframe: (() => {
       try {

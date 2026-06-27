@@ -18,6 +18,7 @@ import { EscalationModal } from "../Notification/EscalationModal";
 import { NotificationPanel } from "../Notification/NotificationPanel";
 import { LiveSignalFeed } from "../system/LiveSignalFeed";
 import { TickStream } from "../system/TickStream";
+import { EnginePoller } from "../system/EnginePoller";
 import AccInfo from "../AccInfo";
 import { useSystemStatus } from "../sidepanel/useSystemStatus";
 import { StrategyControl } from "../StrategyControl/StrategyControl";
@@ -57,6 +58,7 @@ const Dashboard: React.FC = () => {
       {/* Background data streams */}
       <LiveSignalFeed />
       <TickStream />
+      <EnginePoller />
 
       {/* Column 1 */}
       <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0 }}>
