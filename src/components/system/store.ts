@@ -25,6 +25,48 @@ interface Pulse {
 
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1d";
 
+// Derives short/mid/long trend slope from the real per-timeframe bias scores
+// in feed[symbol].bias (backend: BiasEngine score, roughly -10..+10). Replaces
+// reading feed[symbol].trendShort/Mid/Long, which never existed in the real
+// /core/output schema.
+function deriveTrendSlope(feed: Record<string, any>, symbol: string) {
+  const biasMap = feed[symbol]?.bias ?? {};
+  const avgScore = (tfs: string[]) => {
+    const scores = tfs
+      .map((tf) => Number(biasMap[tf]?.score))
+      .filter((v) => Number.isFinite(v));
+    return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  };
+
+  return {
+    short: avgScore(["M15", "M30"]),
+    mid: avgScore(["H1", "H4"]),
+    long: avgScore(["D1", "W1", "MN1"]),
+  };
+}
+
+// Flattens feed[symbol].supply_demand_zones (per-TF lists) into Level[] for
+// the liquidity heatmap — price = zone midpoint, size = ATR-relative
+// strength. Replaces reading feed[symbol].liquidityLevels, which never
+// existed in the real /core/output schema.
+function deriveLiquidityLevels(feed: Record<string, any>, symbol: string): Level[] {
+  const zonesByTf = feed[symbol]?.supply_demand_zones ?? {};
+  const levels: Level[] = [];
+
+  for (const tf in zonesByTf) {
+    for (const zone of zonesByTf[tf] ?? []) {
+      const top = Number(zone.top);
+      const bottom = Number(zone.bottom);
+      const strength = Number(zone.strength);
+      if (Number.isFinite(top) && Number.isFinite(bottom) && Number.isFinite(strength)) {
+        levels.push({ price: (top + bottom) / 2, size: strength });
+      }
+    }
+  }
+
+  return levels;
+}
+
 export interface StoreState {
   feed: Record<string, any>;
   strengths: Strength[];
@@ -160,6 +202,14 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
         strengths,
         lastUpdated: new Date(),
         rawBiasData: feed,
+        // PARKED — no backend data source exists for these yet:
+        //  - auditTrail/escalations: the engine's notification system was
+        //    deleted as dead scratch code, never replaced.
+        //  - volatilityHistory: /core/output has no time-series field.
+        //  - riskDistance/rewardDistance: would need a "current price"
+        //    reference in the feed, which doesn't exist yet either.
+        // See CLAUDE.md for details. trendSlope/liquidityLevels below WERE
+        // in this same category until fixed to derive from real fields.
         auditTrail: feed.auditTrail ?? state.auditTrail,
         volatilityHistory: {
           ...state.volatilityHistory,
@@ -169,15 +219,11 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
         rewardDistance: feed[symbol]?.reward ?? state.rewardDistance,
         trendSlope: {
           ...state.trendSlope,
-          [symbol]: {
-            short: feed[symbol]?.trendShort ?? state.trendSlope[symbol]?.short ?? 0,
-            mid: feed[symbol]?.trendMid ?? state.trendSlope[symbol]?.mid ?? 0,
-            long: feed[symbol]?.trendLong ?? state.trendSlope[symbol]?.long ?? 0,
-          },
+          [symbol]: deriveTrendSlope(feed, symbol),
         },
         liquidityLevels: {
           ...state.liquidityLevels,
-          [symbol]: feed[symbol]?.liquidityLevels ?? state.liquidityLevels[symbol] ?? [],
+          [symbol]: deriveLiquidityLevels(feed, symbol),
         },
       }));
 

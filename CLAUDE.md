@@ -87,6 +87,8 @@ Zustand Store (store.ts)
 4. **Dashboard Layout** — 4-column grid responsive to content
 5. **Bias Table** — Real-time symbol screening, sortable by confidence/momentum
 6. **Strategy Control** — Toggle strategies on/off with immediate feedback
+   (was actually broken until 2026-06-27 — see "Live Audit Findings" below;
+   UI/logic was solid, just hitting the wrong backend path)
 7. **Error Handling** — Proper ErrorBoundary, graceful WebSocket disconnects, API error logging
 8. **Type Safety** — Full TypeScript, strict mode enabled
 9. **Build** — Clean production build, dev server w/ HMR, no console errors
@@ -114,11 +116,18 @@ Zustand Store (store.ts)
    - **Fix:** Add animations (fade-in on indicator add, smooth line draws), better styling for active drawing mode, tooltip on hover
    - **Impact:** Medium — UX is usable but not polished
 
-3. **Performance** (potential)
-   - **Issue:** `/core/output` endpoint does `structure_engine.get_snapshot()` per timeframe per symbol (36 × 9 = 324 calls) on each feed update
-   - **Why:** Backend architecture decision (noted in memory)
-   - **Impact:** Dashboard polling/refresh may feel slow if backend isn't optimized; monitor real usage
-   - **Fix:** Profile backend, consider caching or batching snapshots
+3. **Performance** (mostly resolved 2026-06-27)
+   - **Issue:** `/core/output` independently fetched MT5 candles per (symbol,
+     timeframe) per engine (Bias, Structure, Momentum, Shift, demand) — huge
+     redundant round-trips, ~56s for a 36-symbol response.
+   - **Fix (done):** Engine added a request-scoped `CandleCache` — one batch
+     fetch per (symbol, tf), every engine reads through it. Down to ~15-16s
+     for all 36 symbols. See `mat-strategy-engine`'s `CLAUDE.md`.
+   - **Fix (done):** Engine also added `POST /core/output` accepting
+     `{symbols: [...]}` to process only a subset — ~5s for 5 symbols.
+   - **Remaining:** ~15s for the full 36-symbol case is still MT5
+     round-trip-bound (324 distinct calls); getting under 5s for the full
+     set would need a background-refresh cache architecture, not done.
 
 ### Medium Priority (nice-to-have)
 
@@ -160,18 +169,62 @@ Zustand Store (store.ts)
     - **Fix:** Add Jest + React Testing Library for store, indicators, components
     - **Impact:** Medium — would catch regressions early
 
+## Live Audit Findings (2026-06-27)
+
+This repo was audited live against the real running `mat-strategy-engine`
+backend (a duplicate copy at `D:\mat-engine-dashboard` had already gone
+through the same audit independently — found the same bugs, confirming they
+weren't one-off mistakes). Findings:
+
+1. **`StrategyControl` was actually broken** — it fetched `/api/core/strategies`,
+   proxied by Vite's `/api` rule straight to
+   `http://localhost:8000/api/core/strategies`, which doesn't exist. The
+   engine mounts strategy routes directly under `/core/strategies` (no `/api`
+   prefix) — see `mat-strategy-engine`'s `api/core_router.py`. The component
+   itself (loading/error/disable states, toggle UX) was solid; it was purely
+   a wrong-path bug, undetected because it was likely never run against the
+   live engine before. **Fixed**: added a `/core` proxy rule in
+   `vite.config.ts` (mirroring the `/api` one) and changed both fetch calls
+   in `StrategyControl.tsx` to `/core/strategies` / `/core/strategies/{name}`.
+   Verified live through the dev server proxy — list + PATCH toggle both work.
+2. **`store.ts`'s `setFeed()` read fields that never existed in the real
+   `/core/output`**: `feed[symbol].trendShort/Mid/Long` and
+   `feed[symbol].liquidityLevels`. Fixed — `trendSlope` now derives from real
+   `feed[symbol].bias[tf].score` averaged across short/mid/long timeframe
+   groups; `liquidityLevels` derives from `feed[symbol].supply_demand_zones`
+   flattened across timeframes. Same fix as applied to the `D:` duplicate.
+3. **Still parked — no backend data source exists**: `auditTrail`
+   (top-level `feed.auditTrail`), `volatilityHistory`, `riskDistance`/
+   `rewardDistance`. Same root causes as documented in `mat-strategy-engine`'s
+   CLAUDE.md (notification system deleted, no time-series field, no current-
+   price reference in the feed). Left reading the old field names — harmless
+   fallback to defaults — rather than ripping out the UI wiring.
+4. Dead config removed: `USE_MOCK_DATA`/`USE_MOCK` (never read anywhere in
+   `src/`), `generate-manifest` npm script (pointed at a `generateManifest.js`
+   that never existed). `.env` was tracked in git despite containing
+   environment-specific config — added to `.gitignore`, `.env.example` added,
+   removed from tracking (`git rm --cached`).
+5. `symbolUtils.ts`'s `feedLookupKey()`/`stripBrokerSuffix()` — **left
+   untouched, confirmed correct**. Initially assumed (from the `D:` duplicate
+   audit) that `selectedSymbol: "XAUUSD"` needing a hardcoded `_i` suffix
+   would be a bug here too — it isn't. This repo already solves broker-suffix
+   matching dynamically and more robustly than the `D:` duplicate did.
+6. `npx tsc -b --noEmit` and `npm run build` were already clean before this
+   audit — no TypeScript errors existed here (unlike the `D:` duplicate,
+   which had 17).
+
 ## Configuration
 
 ### Environment Variables (.env)
 ```
 VITE_WS_URL=ws://localhost:8000        # Backend WebSocket base URL
-USE_MOCK_DATA=true                     # (unused) legacy flag
-USE_MOCK=true                          # (unused) legacy flag
 ```
+(`USE_MOCK_DATA`/`USE_MOCK` removed 2026-06-27 — see "Live Audit Findings".)
 
 ### Vite Proxy (vite.config.ts)
 ```
-/api → http://localhost:8000           # REST API proxy (with WS support)
+/api  → http://localhost:8000          # REST API proxy (with WS support)
+/core → http://localhost:8000          # Strategy/output routes (added 2026-06-27 — see "Live Audit Findings")
 ```
 
 ### TypeScript (tsconfig.app.json)
@@ -207,21 +260,32 @@ npm run lint         # ESLint check
 ## Backend Contract
 
 ### LiveSignalFeed (WebSocket)
-**URL:** `ws://localhost:8000/core/output/ws`  
-**Payload (per message):**
+**URL:** `ws://localhost:8000/core/output/ws`
+**Payload (per message) — corrected 2026-06-27, this previously documented
+fields that never existed in the real backend (`volatilityHistory`,
+`trendShort/Mid/Long`, `liquidityLevels` at top level, no `_i` suffix):**
 ```json
 {
-  "XAUUSD": {
-    "bias": { "M1": { "label": "uptrend", "strength_pct": 75 }, ... },
-    "scalping": { "alignment_signal": { "decision": "LONG", "confidence_pct": 85 }, "M1": { ... } },
+  "XAUUSD_i": {
+    "last_updated": "2026-06-27T...",
+    "bias": { "M1": { "label": "neutral", "score": -0.4, "strength": 1.83 }, ... },
+    "scalping": { "alignment_signal": { "decision": "Go Short", "confidence_pct": 50 }, "M1": { "bias": -0.8, "momentum": -0.0002, ... } },
     "swing": { ... },
-    "volatilityHistory": [...],
-    "trendShort": 0.5, "trendMid": 0.3, "trendLong": 0.1,
-    "liquidityLevels": [...]
+    "health": { ... },
+    "signal_health": { ... },
+    "strategy_signals": [{ "symbol": "XAUUSD_i", "timeframe": "M5", "direction": "short", "price": 4071.69, "confidence": 0.5, ... }],
+    "snr_levels": { "M1": [{ "type": "Resistance", "level": 4074.13, "source": "HH", "valid": true }], ... },
+    "order_blocks": { "H4": [{ "type": "Bullish", "high": ..., "low": ..., "valid": true, "mitigated": false }], ... },
+    "fvg": { "M1": [{ "type": "Bullish", "top": ..., "bottom": ..., "mitigated": false }], ... },
+    "supply_demand_zones": { "M1": [{ "type": "supply", "top": ..., "bottom": ..., "strength": 1.18, "valid": true }], ... }
   },
   ...
 }
 ```
+No raw "current price" field exists anywhere in this payload — `riskDistance`/
+`rewardDistance` (RiskRewardMeter) can't be computed from real data until the
+engine adds one. `volatilityHistory` and top-level `auditTrail` also don't
+exist — see CLAUDE.md's "Live Audit Findings" below.
 
 ### TickStream (WebSocket)
 **URL:** `ws://localhost:8000/api/ws/ticks?symbol=XAUUSD`  
@@ -241,10 +305,12 @@ Response: `[{ "time": 1719446400, "open": 2500.1, "high": 2500.5, "low": 2499.9,
 Response: `{ "status": "ok", "resolved": "XAUUSD" }`
 
 ### StrategyControl (REST)
-**GET /api/core/strategies**  
-Response: `[{ "name": "scalping", "enabled": true }, { "name": "swing", "enabled": false }, ...]`
+**GET /core/strategies** (note: `/core`, not `/api/core` — fixed 2026-06-27,
+see "Live Audit Findings")
+Response: `{ "strategies": [{ "name": "ScalpingBiasCascade", "enabled": true }, { "name": "ZoneContinuationStrategy", "enabled": true }, ...] }`
+— 5 real strategies, not "scalping"/"swing" mode names.
 
-**PATCH /api/core/strategies/{name}**  
+**PATCH /core/strategies/{name}**
 Payload: `{ "enabled": true/false }`
 
 ## Key Decisions & Rationale
@@ -295,6 +361,11 @@ Payload: `{ "enabled": true/false }`
 
 ---
 
-**Last Updated:** 2026-06-27  
-**Maintainer:** Farez  
+**Last Updated:** 2026-06-27 (live audit — see "Live Audit Findings")
+**Maintainer:** Farez
 **Status:** MVP Complete, Testing Phase
+
+**Note:** a duplicate of this repo exists at `D:\mat-engine-dashboard` with no
+git remote — that one went through an independent audit pass first (same
+session, same bugs found). This repo (`C:\Users\farez\...`, with the real
+`panamera-network/mat-engine-dashboard` GitHub remote) is the canonical one.

@@ -24,7 +24,7 @@ export const StrategyControl: React.FC = () => {
   const fetchStrategies = async () => {
     try {
       setLoading(true);
-      const res = await fetch("/api/core/strategies");
+      const res = await fetch("/core/strategies");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setStrategies(Array.isArray(data) ? data : data.strategies || []);
@@ -39,7 +39,7 @@ export const StrategyControl: React.FC = () => {
   const toggleStrategy = async (name: string, currentState: boolean) => {
     setToggling((prev) => ({ ...prev, [name]: true }));
     try {
-      const res = await fetch(`/api/core/strategies/${name}`, {
+      const res = await fetch(`/core/strategies/${name}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !currentState }),

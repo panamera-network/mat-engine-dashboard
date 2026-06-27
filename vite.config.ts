@@ -11,6 +11,14 @@ export default defineConfig({
         secure: false,
         ws: true,
       },
+      // The engine mounts strategy/output routes directly under /core (not
+      // /api/core) — see mat-strategy-engine's api/core_router.py.
+      '/core': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+        ws: true,
+      },
     },
   },
   resolve: {
