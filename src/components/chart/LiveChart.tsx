@@ -2,21 +2,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createChart,
   ColorType,
+  LineStyle,
   CandlestickSeries,
 } from "lightweight-charts";
 import type {
   ISeriesApi,
+  IPriceLine,
   UTCTimestamp,
   CandlestickData,
   BarData,
 } from "lightweight-charts";
 import { theme } from "../../theme";
-import { coerceToSeconds, normalizeTimeframe, toCandleTime } from "./chartUtils";
+import { coerceToSeconds, normalizeTimeframe, toCandleTime, toEngineTimeframe } from "./chartUtils";
 import { useStore } from "../system/store";
 import type { Candle as IndicatorCandle } from "../indicators";
 import { INDICATOR_REGISTRY, type IndicatorKey } from "../../lib/indicators";
 import { DrawingTools } from "./DrawingTools";
 import { IndicatorSelector } from "./IndicatorSelector";
+import { fetchHistory } from "../../api/engineClient";
 
 interface Tick {
   symbol: string;
@@ -55,6 +58,7 @@ const LiveChart: React.FC<LiveChartProps> = ({
   const currentCandleRef = useRef<Candle | null>(null);
   const lastTickCountRef = useRef(0);
   const candlesRef = useRef<Candle[]>([]);
+  const structurePriceLinesRef = useRef<IPriceLine[]>([]);
 
   const [overlayOHLC, setOverlayOHLC] = useState<{
     open: number;
@@ -63,6 +67,7 @@ const LiveChart: React.FC<LiveChartProps> = ({
     close: number;
   } | null>(null);
   const [isLive, setIsLive] = useState(true);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [liveDotPos, setLiveDotPos] = useState<{ x: number; y: number } | null>(null);
   const [selectedIndicators, setSelectedIndicators] = useState<Set<IndicatorKey>>(new Set());
   const indicatorSeriesRef = useRef<Map<IndicatorKey, ISeriesApi<any>>>(new Map());
@@ -144,21 +149,19 @@ const LiveChart: React.FC<LiveChartProps> = ({
     });
     seriesRef.current = series;
 
-    const tfMinutes = normalizeTimeframe(timeframe);
-    const url = `/api/mt5/history?symbol=${encodeURIComponent(baseSymbol)}&timeframe=${tfMinutes}&bars=500`;
-
-    fetch(url, { signal: abort.signal })
-      .then((res) => res.json())
-      .then((bars: unknown) => {
+    setIsLoadingHistory(true);
+    fetchHistory(baseSymbol, toEngineTimeframe(timeframe), 200)
+      .then((data) => {
         if (!seriesRef.current || abort.signal.aborted) return;
-        if (!Array.isArray(bars)) {
-          console.warn("Invalid history payload for", baseSymbol);
+        const bars = data.candles ?? [];
+        if (!Array.isArray(bars) || bars.length === 0) {
+          console.warn("Invalid/empty history payload for", baseSymbol);
           return;
         }
 
         const mapped: Candle[] = bars
-          .map((b: Record<string, unknown>) => ({
-            time: coerceToSeconds(b.time ?? b.timestamp) as UTCTimestamp,
+          .map((b) => ({
+            time: coerceToSeconds(b.time) as UTCTimestamp,
             open: Number(b.open),
             high: Number(b.high),
             low: Number(b.low),
@@ -186,16 +189,19 @@ const LiveChart: React.FC<LiveChartProps> = ({
           lastUpdate: "latest",
         });
 
-        const indicatorCandles: IndicatorCandle[] = bars.map((b: Record<string, unknown>) => ({
+        const indicatorCandles: IndicatorCandle[] = bars.map((b) => ({
           high: Number(b.high),
           low: Number(b.low),
           close: Number(b.close),
-          volume: Number(b.volume ?? b.tick_volume ?? 0),
+          volume: Number(b.volume ?? 0),
         }));
         useStore.getState().updateIndicators(baseSymbol, indicatorCandles);
       })
       .catch((err) => {
         if (!abort.signal.aborted) console.error("History fetch error:", err);
+      })
+      .finally(() => {
+        if (!abort.signal.aborted) setIsLoadingHistory(false);
       });
 
     chart.subscribeCrosshairMove((param) => {
@@ -228,6 +234,7 @@ const LiveChart: React.FC<LiveChartProps> = ({
       seriesRef.current = null;
       currentCandleRef.current = null;
       lastTickCountRef.current = 0;
+      structurePriceLinesRef.current = []; // removed with the series above
     };
   }, [baseSymbol, timeframe, width, height, onStatsUpdate, updateLiveDotPosition]);
 
@@ -277,6 +284,72 @@ const LiveChart: React.FC<LiveChartProps> = ({
       }
     }
   }, [selectedIndicators]);
+
+  // Overlay SNR levels, order blocks, and FVGs for the displayed timeframe —
+  // from feed[baseSymbol].snr_levels/order_blocks/fvg (see CLAUDE.md in the
+  // engine repo for the schema). Drawn as price lines: SNR = one line per
+  // level, order blocks/FVGs = a top+bottom line pair bounding the zone
+  // (lightweight-charts has no built-in filled-rectangle primitive).
+  const feed = useStore((s) => s.feed);
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series) return;
+
+    for (const line of structurePriceLinesRef.current) {
+      try {
+        series.removePriceLine(line);
+      } catch {
+        // series may already be gone (symbol/timeframe just changed)
+      }
+    }
+    structurePriceLinesRef.current = [];
+
+    const engineTf = toEngineTimeframe(timeframe);
+    const symbolData = feed[baseSymbol];
+    if (!symbolData) return;
+
+    const snrLevels: any[] = symbolData.snr_levels?.[engineTf] ?? [];
+    const orderBlocks: any[] = symbolData.order_blocks?.[engineTf] ?? [];
+    const fvgs: any[] = symbolData.fvg?.[engineTf] ?? [];
+
+    for (const lvl of snrLevels) {
+      const price = Number(lvl.level);
+      if (!Number.isFinite(price)) continue;
+      structurePriceLinesRef.current.push(
+        series.createPriceLine({
+          price,
+          color: lvl.type === "Resistance" ? theme.colors.red : theme.colors.green,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: `SNR ${lvl.type}`,
+        })
+      );
+    }
+
+    for (const ob of orderBlocks) {
+      const high = Number(ob.high);
+      const low = Number(ob.low);
+      if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
+      const color = ob.type === "Bullish" ? theme.colors.green : theme.colors.red;
+      const suffix = ob.mitigated ? " (mitigated)" : "";
+      structurePriceLinesRef.current.push(
+        series.createPriceLine({ price: high, color, lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: `OB ${ob.type} top${suffix}` }),
+        series.createPriceLine({ price: low, color, lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: `OB ${ob.type} bottom${suffix}` })
+      );
+    }
+
+    for (const fvg of fvgs) {
+      const top = Number(fvg.top);
+      const bottom = Number(fvg.bottom);
+      if (!Number.isFinite(top) || !Number.isFinite(bottom)) continue;
+      const color = fvg.type === "Bullish" ? theme.colors.green : theme.colors.red;
+      structurePriceLinesRef.current.push(
+        series.createPriceLine({ price: top, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: `FVG ${fvg.type} top` }),
+        series.createPriceLine({ price: bottom, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: `FVG ${fvg.type} bottom` })
+      );
+    }
+  }, [feed, baseSymbol, timeframe]);
 
   // Merge only NEW ticks into the current candle
   useEffect(() => {
@@ -377,6 +450,24 @@ const LiveChart: React.FC<LiveChartProps> = ({
       >
         {/* Drawing tools overlay */}
         <DrawingTools containerRef={containerRef as React.RefObject<HTMLDivElement>} />
+
+        {isLoadingHistory && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: `${theme.colors.bg}cc`,
+              color: theme.colors.textDim,
+              fontSize: 13,
+              zIndex: 20,
+            }}
+          >
+            Loading history…
+          </div>
+        )}
 
         {overlayOHLC && (
           <div

@@ -244,6 +244,36 @@ Verified live through the dev server's `/core` proxy: `GET /core/symbols`
 and `POST /core/output` with a filtered `symbols` body both return real
 data.
 
+## LiveChart: real history endpoint + structure overlays (2026-06-27)
+
+`LiveChart.tsx` previously fetched `/api/mt5/history?symbol=...&timeframe=...&bars=500`
+(a bare array). Switched to the engine's `GET /core/history/{symbol}/{timeframe}`
+(via `fetchHistory()` in `api/engineClient.ts`), which returns
+`{symbol, timeframe, candles}` and goes through the same `CandleEngine` /
+`CandleCache` path as the rest of `/core` — see `mat-strategy-engine`'s
+CLAUDE.md. `timeframe` must be converted from this repo's format (`"1h"`) to
+the engine's (`"H1"`) — new `toEngineTimeframe()` in `chartUtils.ts`.
+
+Added:
+- **Loading state** — `isLoadingHistory`, shown as a dimmed overlay over the
+  chart while the history fetch is in flight.
+- **Structure overlays** — SNR levels, order blocks, and FVGs for the
+  symbol/timeframe currently displayed, read from
+  `feed[baseSymbol].snr_levels/order_blocks/fvg` (keyed by engine
+  timeframe). Drawn with `ISeriesApi.createPriceLine()`: SNR = one dashed
+  line per level (red = Resistance, green = Support); order blocks/FVGs =
+  a solid/dotted top+bottom line pair bounding the zone (lightweight-charts
+  has no built-in filled-rectangle primitive, so a zone is approximated as
+  two bounding lines rather than a true filled rectangle). Recomputed
+  whenever `feed`, `baseSymbol`, or `timeframe` changes; old lines are
+  removed via `removePriceLine()` before redrawing.
+
+Verified live: `GET /core/history/XAUUSD_i/H1?count=200` through the dev
+server's `/core` proxy returns real OHLCV data in the expected shape.
+Visual rendering (overlay lines actually appearing correctly positioned on
+the chart) was **not** verified in an actual browser — the Chrome
+automation tool wasn't reachable in this environment. Worth a manual check.
+
 ## Configuration
 
 ### Environment Variables (.env)

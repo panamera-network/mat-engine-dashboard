@@ -1,5 +1,16 @@
 import type { UTCTimestamp } from "lightweight-charts";
 
+const ENGINE_TIMEFRAME_MAP: Record<string, string> = {
+  "1m": "M1", "5m": "M5", "15m": "M15", "30m": "M30",
+  "1h": "H1", "4h": "H4", "1d": "D1", "1w": "W1",
+};
+
+/** Converts this repo's chart timeframe strings ("1h", "4h", ...) to the
+ * engine's format ("H1", "H4", ...) used by /core/history and /core/output. */
+export function toEngineTimeframe(tf: string): string {
+  return ENGINE_TIMEFRAME_MAP[tf.toLowerCase()] ?? tf.toUpperCase();
+}
+
 export function normalizeTimeframe(tf: string): number {
   const lower = tf.toLowerCase().trim();
   if (lower.endsWith("m")) return parseInt(lower.replace("m", ""), 10);

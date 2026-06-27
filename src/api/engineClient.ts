@@ -24,3 +24,30 @@ export async function fetchAvailableSymbols(): Promise<string[]> {
   const data = await res.json();
   return data.symbols ?? [];
 }
+
+export interface EngineCandle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface HistoryResponse {
+  symbol: string;
+  timeframe: string;
+  candles: EngineCandle[];
+}
+
+/**
+ * OHLCV history for one symbol/timeframe — `timeframe` must already be in
+ * engine format ("H1", not "1h"); see chartUtils.ts's toEngineTimeframe().
+ */
+export async function fetchHistory(symbol: string, timeframe: string, count = 200): Promise<HistoryResponse> {
+  const res = await fetch(
+    `/core/history/${encodeURIComponent(symbol)}/${encodeURIComponent(timeframe)}?count=${count}`
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
