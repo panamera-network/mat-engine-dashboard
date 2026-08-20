@@ -26,8 +26,17 @@ const categoryMap: Record<string, string> = {
   manual: "system",
   narrative: "notification",
   notification: "notification",
+  topRanked: "notification",
+  "config-change": "system",
 };
 
+function getLogCategory(log: LogEntry): string {
+  if (["signal", "error", "order", "system", "notification", "escalation"].includes(log.type)) {
+    return log.type === "escalation" ? "signal" : log.type;
+  }
+
+  return categoryMap[log.label ?? ""] ?? categoryMap[log.context?.trigger ?? ""] ?? "notification";
+}
 
 export const NotificationPanel: React.FC<{ logs: LogEntry[] }> = ({ logs }) => {
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -40,7 +49,7 @@ useEffect(() => {
   const latest = logs[logs.length - 1];
 
   if (newLogs && latest) {
-    const category = categoryMap[latest.label ?? ""];
+    const category = getLogCategory(latest);
 
     if (latest.label === "verdictFlip") {
       const prev = latest.context?.previousBias;
@@ -61,7 +70,7 @@ useEffect(() => {
 
 
     // 🔴 EscalationModal for critical tabs
-    if (["signal", "error", "order"].includes(category)) {
+    if (["signal", "error", "order"].includes(category) || latest.type === "escalation") {
       setEscalation(latest);
     }
 
@@ -117,7 +126,7 @@ useEffect(() => {
 
   const filteredLogs = logs.filter((log) => {
     if (selectedCategory === "all") return true;
-    return categoryMap[log.label ?? ""] === selectedCategory;
+    return getLogCategory(log) === selectedCategory;
   });
 
   return (

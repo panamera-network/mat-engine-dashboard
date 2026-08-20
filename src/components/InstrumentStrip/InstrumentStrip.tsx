@@ -31,7 +31,7 @@ export const InstrumentStrip: React.FC = () => {
   const liquidity = liquidityLevels[feedKey] ?? liquidityLevels[dataKey] ?? [];
   const timeline = biasTimeline[feedKey] ?? biasTimeline[dataKey] ?? [];
 
-  const size = 200;
+  const size = 150;
 
   return (
     <div
@@ -40,6 +40,9 @@ export const InstrumentStrip: React.FC = () => {
         flexDirection: "column",
         gap: theme.spacing.md,
         width: "100%",
+        minWidth: 0,
+        minHeight: 0,
+        overflow: "auto",
       }}
     >
       <AuditTrail events={auditTrail} />

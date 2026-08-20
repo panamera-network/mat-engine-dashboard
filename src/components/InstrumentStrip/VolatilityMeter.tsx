@@ -8,8 +8,8 @@ interface VolatilityMeterProps {
 }
 
 export const VolatilityMeter: React.FC<VolatilityMeterProps> = ({ size = 200 }) => {
-  const { dataKey } = useActiveSymbol();
-  const rawVol = useStore((s) => (dataKey ? s.volatility[dataKey] : undefined));
+  const { feedKey, dataKey } = useActiveSymbol();
+  const rawVol = useStore((s) => s.volatility[feedKey] ?? (dataKey ? s.volatility[dataKey] : undefined));
   const value = typeof rawVol === "number" && !isNaN(rawVol) ? rawVol : 0;
 
   return (

@@ -8,8 +8,8 @@ interface CCIMeterProps {
 }
 
 export const CCIMeter: React.FC<CCIMeterProps> = ({ size = 200 }) => {
-  const { dataKey } = useActiveSymbol();
-  const rawCci = useStore((s) => (dataKey ? s.cci[dataKey] : undefined));
+  const { feedKey, dataKey } = useActiveSymbol();
+  const rawCci = useStore((s) => s.cci[feedKey] ?? (dataKey ? s.cci[dataKey] : undefined));
   const value = typeof rawCci === "number" && !isNaN(rawCci) ? rawCci : 0;
 
   return (

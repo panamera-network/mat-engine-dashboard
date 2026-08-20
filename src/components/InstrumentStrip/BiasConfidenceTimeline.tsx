@@ -50,7 +50,7 @@ export const BiasConfidenceTimeline: React.FC<BiasConfidenceTimelineProps> = ({
   return (
     <Panel
       title="Bias/Confidence Timeline"
-      style={{ width: `${Math.max(0, Math.min(100, swing.confidence))}%` }}
+      style={{ width: "100%" }}
     >
       <div
         style={{
@@ -67,7 +67,7 @@ export const BiasConfidenceTimeline: React.FC<BiasConfidenceTimelineProps> = ({
             top: "30%",
             height: "40%",
             left: 0,
-            width: `${swing.confidence}%`,
+            width: `${Math.max(0, Math.min(100, swing.confidence))}%`,
             background:
               swing.bias > 0
                 ? theme.colors.green
@@ -84,7 +84,7 @@ export const BiasConfidenceTimeline: React.FC<BiasConfidenceTimelineProps> = ({
             top: "30%",
             height: "40%",
             left: 0,
-            width: `${scalp.confidence}%`,
+            width: `${Math.max(0, Math.min(100, scalp.confidence))}%`,
             background:
               scalp.bias > 0
                 ? theme.colors.green

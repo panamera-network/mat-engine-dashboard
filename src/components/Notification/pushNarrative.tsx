@@ -26,11 +26,11 @@ export const pushNarrative = (
 
   const triggerType = context.trigger ?? label;
 
-  const isSignal = triggerType === "signalChange";
+  const isSignal = triggerType === "signalChange" || triggerType === "verdictFlip";
 
   logEvent({
     type: isSignal ? "signal" : "notification",
-    label,
+    label: triggerType,
     severity: "info",
     message,
     context: {

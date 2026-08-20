@@ -1,10 +1,16 @@
 // system/logError.ts
-import { pushSystemLog } from "./pushSystemLog";
+import { useLogStore } from "./logStore";
 
 export function logError(source: string, message: string, error: unknown, context: Record<string, any> = {}) {
-  pushSystemLog("manual", message, {
-    source,
-    error: String(error),
-    ...context,
+  useLogStore.getState().logEvent({
+    type: "error",
+    label: "error",
+    severity: "warning",
+    message,
+    context: {
+      source,
+      error: String(error),
+      ...context,
+    },
   });
 }

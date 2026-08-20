@@ -11,9 +11,11 @@ import { detectConfidenceSurge } from "./confidenceSurge";
 import { detectVolatilitySpike } from "./detectVolatilitySpike";
 
 export const BiasTable: React.FC = () => {
-  const feed = useStore((state) => state.feed);
+  const liveFeed = useStore((state) => state.feed);
+  const biasTableFeed = useStore((state) => state.biasTableFeed);
   const setSelectedSymbol = useStore((s) => s.setSelectedSymbol);
   const activeSymbol = useStore((s) => s.selectedSymbol);
+  const feed = Object.keys(biasTableFeed).length > 0 ? biasTableFeed : liveFeed;
 
   const prevSignalsRef = useRef<Record<string, {
     scalping?: string;

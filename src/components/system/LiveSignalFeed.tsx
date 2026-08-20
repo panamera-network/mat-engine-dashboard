@@ -2,11 +2,13 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "./store";
 import { feedLookupKey } from "../../lib/symbolUtils";
+import { useLogStore } from "../Notification/logStore";
 
 export function LiveSignalFeed() {
   const setFeed = useStore((s) => s.setFeed);
   const addBiasPoint = useStore((s) => s.addBiasPoint);
   const wsRef = useRef<WebSocket | null>(null);
+  const notifiedEntriesRef = useRef<Set<string>>(new Set());
   const setWsBiasStatus = useStore.getState().setWsBiasStatus;
 
   // Bias WebSocket — connect once, do not reconnect on symbol change
@@ -29,6 +31,26 @@ export function LiveSignalFeed() {
         try {
           const feed = JSON.parse(event.data);
           setFeed(feed);
+          const logEvent = useLogStore.getState().logEvent;
+
+          for (const [feedSymbol, data] of Object.entries(feed)) {
+            for (const entry of (data as any)?.entry_suggestions ?? []) {
+              if (entry?.status !== "ready" || !entry?.id || notifiedEntriesRef.current.has(entry.id)) {
+                continue;
+              }
+
+              notifiedEntriesRef.current.add(entry.id);
+              logEvent({
+                type: "notification",
+                source: "EntrySuggestionEngine",
+                label: "entrySuggestionReady",
+                symbol: feedSymbol,
+                severity: entry.confidence >= 0.85 ? "critical" : "warning",
+                message: `${String(entry.side).toUpperCase()} ${entry.timeframe} setup ready @ ${entry.entry_price}`,
+                context: { trigger: "entrySuggestionReady", entry },
+              });
+            }
+          }
 
           const { selectedSymbol, mode } = useStore.getState();
           const symbol = feedLookupKey(selectedSymbol, feed);

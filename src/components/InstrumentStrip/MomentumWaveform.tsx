@@ -7,8 +7,8 @@ interface MomentumWaveformProps {
 }
 
 export const MomentumWaveform: React.FC<MomentumWaveformProps> = ({ height = 120 }) => {
-  const { dataKey } = useActiveSymbol();
-  const rawSamples = useStore((s) => (dataKey ? s.momentum[dataKey] : undefined));
+  const { feedKey, dataKey } = useActiveSymbol();
+  const rawSamples = useStore((s) => s.momentum[feedKey] ?? (dataKey ? s.momentum[dataKey] : undefined));
   const samples: number[] = rawSamples ?? [];
 
   const baselineY = 50;

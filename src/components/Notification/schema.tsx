@@ -1,6 +1,8 @@
 type LogType =
+  | "signal"
   | "order"
   | "error"
+  | "system"
   | "notification"
   | "escalation"
   | "verdict-flip"

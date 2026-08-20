@@ -13,8 +13,7 @@ import CorrelationClusters from "../Correlation/CorrelationClusters";
 import { InstrumentStrip } from "../InstrumentStrip/InstrumentStrip";
 import MultiTimeframeView from "../chart/MultiTimeframeView";
 import { PulseBox } from "../../ui/PulseBox";
-import { useLogStore, type LogEntry } from "../Notification/logStore";
-import { EscalationModal } from "../Notification/EscalationModal";
+import { useLogStore } from "../Notification/logStore";
 import { NotificationPanel } from "../Notification/NotificationPanel";
 import { LiveSignalFeed } from "../system/LiveSignalFeed";
 import { TickStream } from "../system/TickStream";
@@ -27,26 +26,13 @@ const Dashboard: React.FC = () => {
   const pulses = useStore((s) => s.pulses);
   const logs = useLogStore((s) => s.logs);
 
-  const [escalation, setEscalation] = React.useState<LogEntry | null>(null);
-  const lastEscalationId = React.useRef<string | null>(null);
   const { data: status } = useSystemStatus();
-
-  React.useEffect(() => {
-    const latest = logs.at(-1);
-    if (
-      latest?.type === "escalation" &&
-      latest.id !== lastEscalationId.current
-    ) {
-      setEscalation(latest);
-      lastEscalationId.current = latest.id;
-    }
-  }, [logs]);
 
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 2fr 1.5fr 1fr",
+        gridTemplateColumns: "minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1fr)",
         gap: theme.spacing.md,
         width: "100%",
         height: "100%",
@@ -61,7 +47,7 @@ const Dashboard: React.FC = () => {
       <EnginePoller />
 
       {/* Column 1 */}
-      <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0, minWidth: 0 }}>
         <PulseBox flex={1}>
           <HUDHeader>Acc Info</HUDHeader>
           {separator}
@@ -84,27 +70,17 @@ const Dashboard: React.FC = () => {
           }}
         >
           <NotificationPanel logs={logs} />
-
-          {escalation && (
-            <EscalationModal
-              title={escalation.message}
-              severity={escalation.severity ?? "info"}
-              narrative={escalation.context?.narrative ?? ""}
-              context={escalation.context}
-              onClose={() => setEscalation(null)}
-            />
-          )}
         </div>
       </div>
 
       {/* Column 2 */}
-      <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0, minWidth: 0 }}>
         <PulseBox flex={2} trigger={pulses.bias}>
           <HUDHeader>📊 Pair Bias Overview</HUDHeader>
           {separator}
           <BiasTable />
         </PulseBox>
-        <div style={{ display: "flex", gap: theme.spacing.md, flex: 1.2, minHeight: 0 }}>
+        <div style={{ display: "flex", gap: theme.spacing.md, flex: 1.2, minHeight: 0, minWidth: 0 }}>
           <PulseBox flex={1} trigger={pulses.correlation}>
             <HUDHeader>🔗 Correlation Clusters</HUDHeader>
             {separator}
@@ -120,7 +96,7 @@ const Dashboard: React.FC = () => {
       </div>
 
       {/* Column 3 */}
-      <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0, minWidth: 0 }}>
         <PulseBox flex={1} trigger={pulses.multiTimeframe}>
           <HUDHeader>📊 Multi‑timeframe view</HUDHeader>
           {separator}
@@ -134,7 +110,7 @@ const Dashboard: React.FC = () => {
       </div>
 
       {/* Column 4 */}
-      <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0, minWidth: 0 }}>
         <PulseBox flex={2.5} trigger={pulses.timeline || pulses.volatility}>
           <HUDHeader>⚡ Scalp Verdict · Bias & Volatility</HUDHeader>
           {separator}

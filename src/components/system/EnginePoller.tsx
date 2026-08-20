@@ -1,19 +1,66 @@
-// EnginePoller.tsx — polls POST /core/output for the selected symbols only.
-// Runs alongside LiveSignalFeed's websocket (which always fetches all
-// symbols) rather than replacing it: CurrencyMeter's strength calculation
-// needs full symbol coverage, while this gives a fast, filtered refresh for
-// the panels that only care about the selected symbols.
-import { useEffect, useRef } from "react";
+// EnginePoller polls POST /core/output for the selected symbols only.
+// Its result is intentionally kept separate from the websocket feed and is
+// used by BiasTable only. Full-market widgets keep using LiveSignalFeed data.
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { useStore } from "./store";
 import { fetchOutput } from "../../api/engineClient";
+import { useLogStore } from "../Notification/logStore";
 
 const POLL_INTERVAL_MS = 30_000;
+const ESCALATING_ACTIONS = new Set(["Alert", "Enter", "Invalidate"]);
+
+function emitEngineEscalations(
+  feed: Record<string, any>,
+  lastActions: MutableRefObject<Record<string, string>>
+) {
+  const logEvent = useLogStore.getState().logEvent;
+
+  for (const [symbol, symbolData] of Object.entries(feed)) {
+    for (const mode of ["scalping", "swing"] as const) {
+      const diagnostic = symbolData?.[mode]?.diagnostic;
+      const action = diagnostic?.action;
+      const stage = diagnostic?.stage;
+      if (!action || !ESCALATING_ACTIONS.has(action)) continue;
+
+      const key = `${symbol}:${mode}`;
+      const signature = `${stage}:${action}:${diagnostic?.summary ?? ""}`;
+      if (lastActions.current[key] === signature) continue;
+      lastActions.current[key] = signature;
+
+      const severity = action === "Enter" ? "critical" : "warning";
+      const score = diagnostic?.score_pct ?? diagnostic?.cascade_score ?? diagnostic?.conviction_score;
+      const summary = diagnostic?.summary ?? `${mode} ${stage} / ${action}`;
+
+      logEvent({
+        type: "escalation",
+        label: "engineEscalation",
+        symbol,
+        severity,
+        message: `${symbol} ${mode} ${stage}: ${action}`,
+        context: {
+          source: "EnginePoller",
+          symbol,
+          mode,
+          stage,
+          action,
+          score,
+          risk: diagnostic?.risk,
+          reasons: diagnostic?.reasons ?? [],
+          narrative: summary,
+          diagnostic,
+        },
+        source: "EnginePoller",
+      });
+    }
+  }
+}
 
 export function EnginePoller() {
   const selectedSymbols = useStore((s) => s.selectedSymbols);
-  const setFeed = useStore((s) => s.setFeed);
+  const setBiasTableFeed = useStore((s) => s.setBiasTableFeed);
   const setEngineStatus = useStore((s) => s.setEngineStatus);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastEscalationActionsRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -23,7 +70,8 @@ export function EnginePoller() {
       try {
         const data = await fetchOutput(selectedSymbols);
         if (cancelled) return;
-        setFeed(data);
+        setBiasTableFeed(data);
+        emitEngineEscalations(data, lastEscalationActionsRef);
         setEngineStatus({ loading: false, error: null, lastUpdated: new Date() });
       } catch (err) {
         if (cancelled) return;
@@ -39,10 +87,10 @@ export function EnginePoller() {
       cancelled = true;
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSymbols.join(",")]);
+  }, [selectedSymbols, setBiasTableFeed, setEngineStatus]);
 
   return null;
 }
 
 export default EnginePoller;
+

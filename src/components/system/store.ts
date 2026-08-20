@@ -69,12 +69,52 @@ function deriveLiquidityLevels(feed: Record<string, any>, symbol: string): Level
   return levels;
 }
 
+function deriveAuditTrail(feed: Record<string, any>, symbol: string): AuditEvent[] {
+  const symbolData = feed[symbol] ?? {};
+  const events: AuditEvent[] = [];
+
+  for (const signal of symbolData.strategy_signals ?? []) {
+    const confidence = Number(signal.confidence);
+    events.push({
+      ts: signal.timeframe ?? "strategy",
+      level: confidence >= 0.8 ? "High" : confidence >= 0.5 ? "Medium" : "Low",
+      value: Number.isFinite(confidence) ? Math.round(confidence * 100) : 0,
+      escalations: ["badge"],
+    });
+  }
+
+  for (const [tf, event] of Object.entries(symbolData.structure_events ?? {})) {
+    const valid = Boolean((event as any)?.valid);
+    if (!valid) continue;
+    events.push({
+      ts: `${tf} ${(event as any).type ?? "structure"}`,
+      level: (event as any).type === "CHOCH" ? "High" : "Medium",
+      value: 100,
+      escalations: ["badge"],
+    });
+  }
+
+  for (const entry of symbolData.entry_suggestions ?? []) {
+    const confidence = Number(entry.confidence);
+    events.push({
+      ts: `${entry.timeframe ?? "TF"} ${entry.side ?? "entry"}`,
+      level: entry.status === "ready" ? "High" : confidence >= 0.55 ? "Medium" : "Low",
+      value: Number.isFinite(confidence) ? Math.round(confidence * 100) : 0,
+      escalations: entry.status === "ready" ? ["badge", "push"] : ["badge"],
+    });
+  }
+
+  return events.slice(-5).reverse();
+}
+
 export interface StoreState {
   feed: Record<string, any>;
+  biasTableFeed: Record<string, any>;
   strengths: Strength[];
   mode: Mode;
   lastUpdated: Date | null;
   setFeed: (feed: Record<string, any>) => void;
+  setBiasTableFeed: (feed: Record<string, any>) => void;
   setMode: (mode: Mode) => void;
 
   wsBiasStatus: "connected" | "disconnected" | "reconnecting";
@@ -141,6 +181,7 @@ export interface StoreState {
 export const useStore = create<StoreState, [["zustand/subscribeWithSelector", never]]>(
   subscribeWithSelector<StoreState>((set, get) => ({
     feed: {},
+    biasTableFeed: {},
     strengths: [],
     mode: "scalping",
     lastUpdated: null,
@@ -251,9 +292,10 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
         //  - volatilityHistory: /core/output has no time-series field.
         //  - riskDistance/rewardDistance: would need a "current price"
         //    reference in the feed, which doesn't exist yet either.
+        // Entry suggestions now come from engine output and feed auditTrail.
         // See CLAUDE.md for details. trendSlope/liquidityLevels below WERE
         // in this same category until fixed to derive from real fields.
-        auditTrail: feed.auditTrail ?? state.auditTrail,
+        auditTrail: deriveAuditTrail(feed, symbol),
         volatilityHistory: {
           ...state.volatilityHistory,
           [symbol]: feed[symbol]?.volatilityHistory ?? state.volatilityHistory[symbol] ?? [],
@@ -278,6 +320,11 @@ export const useStore = create<StoreState, [["zustand/subscribeWithSelector", ne
       get().triggerPulse("currency", intensity, color);
       get().triggerPulse("bias", Math.min(1, intensity + 0.2), theme.colors.accentBlue);
       get().triggerPulse("correlation", 0.5, theme.colors.amber);
+    },
+
+    setBiasTableFeed: (feed) => {
+      set({ biasTableFeed: feed });
+      get().triggerPulse("bias", 0.5, theme.colors.accentBlue);
     },
 
     setMode: (mode) => {

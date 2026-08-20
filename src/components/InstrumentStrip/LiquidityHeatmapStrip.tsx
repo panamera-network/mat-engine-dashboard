@@ -13,7 +13,11 @@ export const LiquidityHeatmapStrip: React.FC<{ levels: Level[] }> = ({ levels })
   return (
     <Panel title="Liquidity Heatmap">
       <div style={{ display: "flex", height: 40, background: theme.colors.panelAlt }}>
-        {levels.map((l, i) => (
+        {levels.length === 0 ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", color: theme.colors.textDim, fontSize: 12 }}>
+            No SND zones
+          </div>
+        ) : levels.map((l, i) => (
           <div
             key={i}
             style={{

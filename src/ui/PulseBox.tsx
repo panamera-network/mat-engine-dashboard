@@ -74,6 +74,7 @@ useEffect(() => {
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
+        minWidth: 0,
         flex: flex ?? 1,
         boxShadow: shadows,
         backdropFilter: "blur(6px)",

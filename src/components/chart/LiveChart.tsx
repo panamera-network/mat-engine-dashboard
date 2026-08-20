@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createChart,
+  createSeriesMarkers,
   ColorType,
   LineStyle,
   CandlestickSeries,
@@ -8,6 +9,9 @@ import {
 import type {
   ISeriesApi,
   IPriceLine,
+  ISeriesMarkersPluginApi,
+  SeriesMarker,
+  Time,
   UTCTimestamp,
   CandlestickData,
   BarData,
@@ -15,10 +19,9 @@ import type {
 import { theme } from "../../theme";
 import { coerceToSeconds, normalizeTimeframe, toCandleTime, toEngineTimeframe } from "./chartUtils";
 import { useStore } from "../system/store";
+import { feedLookupKey } from "../../lib/symbolUtils";
 import type { Candle as IndicatorCandle } from "../indicators";
-import { INDICATOR_REGISTRY, type IndicatorKey } from "../../lib/indicators";
-import { DrawingTools } from "./DrawingTools";
-import { IndicatorSelector } from "./IndicatorSelector";
+import { COLORS, DrawingTools, TOOL_BUTTONS, type DrawMode } from "./DrawingTools";
 import { fetchHistory } from "../../api/engineClient";
 
 interface Tick {
@@ -40,9 +43,55 @@ interface LiveChartProps {
   ) => void;
   width?: number;
   height?: number;
+  showHeader?: boolean;
+  enableDrawing?: boolean;
+  enableOverlays?: boolean;
+  enableStrategyMarkers?: boolean;
 }
 
 type Candle = CandlestickData<UTCTimestamp>;
+
+interface StrategySignal {
+  strategy?: string;
+  symbol?: string;
+  timeframe?: string;
+  direction?: "long" | "short" | string;
+  reason?: string;
+  confidence?: number;
+  trigger?: string;
+  timestamp?: number | string | { seconds?: number; epoch?: number; valueOf?: () => number };
+  price?: number | string;
+}
+
+interface StructureBox {
+  id: string;
+  label: string;
+  left: number;
+  width: number;
+  top: number;
+  height: number;
+  color: string;
+  borderColor: string;
+}
+
+interface StructureZone {
+  id: string;
+  label: string;
+  topPrice: number;
+  bottomPrice: number;
+  color: string;
+  timestamp?: StrategySignal["timestamp"];
+}
+
+const SNR_TIMEFRAMES = ["D1", "H4", "H1", "M15"];
+const DEFAULT_OVERLAYS = {
+  snr: true,
+  snd: true,
+  ob: true,
+  fvg: true,
+  bos: true,
+  choch: true,
+};
 
 const LiveChart: React.FC<LiveChartProps> = ({
   baseSymbol,
@@ -51,14 +100,22 @@ const LiveChart: React.FC<LiveChartProps> = ({
   onStatsUpdate,
   width,
   height,
+  showHeader = true,
+  enableDrawing = true,
+  enableOverlays = true,
+  enableStrategyMarkers = true,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartHostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const currentCandleRef = useRef<Candle | null>(null);
   const lastTickCountRef = useRef(0);
   const candlesRef = useRef<Candle[]>([]);
   const structurePriceLinesRef = useRef<IPriceLine[]>([]);
+  const structureZonesRef = useRef<StructureZone[]>([]);
+  const strategyMarkersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const onStatsUpdateRef = useRef(onStatsUpdate);
 
   const [overlayOHLC, setOverlayOHLC] = useState<{
     open: number;
@@ -69,8 +126,17 @@ const LiveChart: React.FC<LiveChartProps> = ({
   const [isLive, setIsLive] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [liveDotPos, setLiveDotPos] = useState<{ x: number; y: number } | null>(null);
-  const [selectedIndicators, setSelectedIndicators] = useState<Set<IndicatorKey>>(new Set());
-  const indicatorSeriesRef = useRef<Map<IndicatorKey, ISeriesApi<any>>>(new Map());
+  const [structureBoxes, setStructureBoxes] = useState<StructureBox[]>([]);
+  const [drawingMode, setDrawingMode] = useState<DrawMode>(null);
+  const [drawingColor, setDrawingColor] = useState(COLORS[0]);
+  const [drawingWidth, setDrawingWidth] = useState(2);
+  const [boxLabel, setBoxLabel] = useState("zone");
+  const [drawingActions, setDrawingActions] = useState<{ undo: () => void; clear: () => void } | null>(null);
+  const [overlays, setOverlays] = useState(DEFAULT_OVERLAYS);
+
+  useEffect(() => {
+    onStatsUpdateRef.current = onStatsUpdate;
+  }, [onStatsUpdate]);
 
   const updateLiveDotPosition = useCallback(() => {
     const candle = currentCandleRef.current;
@@ -82,32 +148,55 @@ const LiveChart: React.FC<LiveChartProps> = ({
     if (x != null && y != null) setLiveDotPos({ x, y });
   }, []);
 
-  const handleToggleIndicator = useCallback((indicator: IndicatorKey) => {
-    setSelectedIndicators((prev) => {
-      const next = new Set(prev);
-      if (next.has(indicator)) {
-        next.delete(indicator);
-        // Remove series from chart
-        const series = indicatorSeriesRef.current.get(indicator);
-        if (series && chartRef.current) {
-          chartRef.current.removeSeries(series as any);
-          indicatorSeriesRef.current.delete(indicator);
-        }
-      } else {
-        next.add(indicator);
-      }
-      return next;
+  const recalculateStructureBoxes = useCallback(() => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    const container = containerRef.current;
+    if (!chart || !series || !container) return;
+
+    const tfSeconds = normalizeTimeframe(timeframe) * 60;
+    const containerWidth = container.clientWidth;
+    const nextBoxes = structureZonesRef.current.flatMap((zone) => {
+      const topY = series.priceToCoordinate(Math.max(zone.topPrice, zone.bottomPrice));
+      const bottomY = series.priceToCoordinate(Math.min(zone.topPrice, zone.bottomPrice));
+      if (topY == null || bottomY == null) return [];
+
+      const rawSeconds = zone.timestamp ? coerceToSeconds(zone.timestamp) : NaN;
+      const anchorTime = Number.isFinite(rawSeconds)
+        ? toCandleTime(rawSeconds, tfSeconds) as UTCTimestamp
+        : null;
+      const anchorX = anchorTime ? chart.timeScale().timeToCoordinate(anchorTime) : null;
+      if (anchorX == null) return [];
+
+      const left = Math.max(0, anchorX);
+      const rightPadding = 72;
+      const width = Math.max(24, containerWidth - left - rightPadding);
+      if (width <= 24) return [];
+
+      return [{
+        id: zone.id,
+        label: zone.label,
+        left,
+        width,
+        top: Math.min(topY, bottomY),
+        height: Math.max(14, Math.abs(bottomY - topY)),
+        color: `${zone.color}2a`,
+        borderColor: zone.color,
+      }];
     });
-  }, []);
+
+    setStructureBoxes(nextBoxes);
+  }, [timeframe]);
 
   // Create chart + seed with history
   useEffect(() => {
-    if (!baseSymbol || !containerRef.current) return;
+    if (!baseSymbol || !containerRef.current || !chartHostRef.current) return;
 
     const container = containerRef.current;
+    const chartHost = chartHostRef.current;
     const abort = new AbortController();
 
-    const chart = createChart(container, {
+    const chart = createChart(chartHost, {
       width: width ?? container.clientWidth,
       height: height ?? (container.clientHeight || 500),
       layout: {
@@ -148,6 +237,7 @@ const LiveChart: React.FC<LiveChartProps> = ({
       wickDownColor: theme.colors.red,
     });
     seriesRef.current = series;
+    strategyMarkersRef.current = createSeriesMarkers(series, [], { zOrder: "top" });
 
     setIsLoadingHistory(true);
     fetchHistory(baseSymbol, toEngineTimeframe(timeframe), 200)
@@ -182,8 +272,9 @@ const LiveChart: React.FC<LiveChartProps> = ({
         setOverlayOHLC({ open: last.open, high: last.high, low: last.low, close: last.close });
         setIsLive(true);
         updateLiveDotPosition();
+        requestAnimationFrame(recalculateStructureBoxes);
 
-        onStatsUpdate?.({
+        onStatsUpdateRef.current?.({
           name: baseSymbol,
           ohlc: { open: last.open, high: last.high, low: last.low, close: last.close },
           lastUpdate: "latest",
@@ -223,74 +314,52 @@ const LiveChart: React.FC<LiveChartProps> = ({
       }
     });
 
-    const ro = new ResizeObserver(() => updateLiveDotPosition());
+    // lightweight-charts does NOT auto-resize with its container — without
+    // this, the canvas stays at whatever size it was created with (often
+    // measured before the surrounding flex/grid layout has settled), and
+    // visually overflows or underflows the container as the page layout
+    // changes (window resize, panel reflow, etc).
+    const ro = new ResizeObserver(() => {
+      // Only auto-track the container when no explicit width/height was
+      // passed in — explicit props mean the caller wants a fixed size.
+      if (width === undefined && height === undefined) {
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        if (w > 0 && h > 0) {
+          chart.resize(w, h);
+        }
+      }
+      updateLiveDotPosition();
+      recalculateStructureBoxes();
+    });
     ro.observe(container);
+
+    const handleVisibleRangeChange = () => {
+      updateLiveDotPosition();
+      recalculateStructureBoxes();
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
 
     return () => {
       abort.abort();
       ro.disconnect();
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
       currentCandleRef.current = null;
       lastTickCountRef.current = 0;
       structurePriceLinesRef.current = []; // removed with the series above
+      structureZonesRef.current = [];
+      strategyMarkersRef.current = null;
     };
-  }, [baseSymbol, timeframe, width, height, onStatsUpdate, updateLiveDotPosition]);
+  }, [baseSymbol, timeframe, width, height, updateLiveDotPosition, recalculateStructureBoxes]);
 
-  // Render/remove indicators
-  useEffect(() => {
-    if (!chartRef.current || !candlesRef.current.length) return;
-
-    for (const indicator of selectedIndicators) {
-      if (indicatorSeriesRef.current.has(indicator)) continue; // Already rendered
-
-      try {
-        const config = INDICATOR_REGISTRY[indicator]();
-        let indicatorData: any;
-
-        if (config.params.length === 0) {
-          indicatorData = (config.fn as any)(candlesRef.current);
-        } else if (config.params.length === 1) {
-          indicatorData = (config.fn as any)(candlesRef.current, config.params[0]);
-        } else if (config.params.length === 2) {
-          indicatorData = (config.fn as any)(candlesRef.current, config.params[0], config.params[1]);
-        } else {
-          indicatorData = (config.fn as any)(candlesRef.current, config.params[0], config.params[1], config.params[2]);
-        }
-
-        // Only handle simple single-series indicators for now
-        if (!("data" in indicatorData)) {
-          console.warn(`[LiveChart] Indicator ${indicator} not yet supported`);
-          continue;
-        }
-
-        const series = (chartRef.current.addSeries as any)("Line" as any, {
-          color: indicatorData.color || theme.colors.text,
-          lineWidth: (indicatorData.lineWidth || 2) as any,
-          priceScaleId: "right",
-        });
-
-        // Convert IndicatorPoint to chart data format
-        const data = indicatorData.data.map((p: any) => ({
-          time: (p.time / 1000) as UTCTimestamp,
-          value: p.value,
-        }));
-
-        series.setData(data);
-        indicatorSeriesRef.current.set(indicator, series);
-      } catch (err) {
-        console.error(`[LiveChart] Failed to render indicator ${indicator}:`, err);
-      }
-    }
-  }, [selectedIndicators]);
-
-  // Overlay SNR levels, order blocks, and FVGs for the displayed timeframe —
-  // from feed[baseSymbol].snr_levels/order_blocks/fvg (see CLAUDE.md in the
-  // engine repo for the schema). Drawn as price lines: SNR = one line per
-  // level, order blocks/FVGs = a top+bottom line pair bounding the zone
-  // (lightweight-charts has no built-in filled-rectangle primitive).
+  // Overlay structure from engine output. SNR stays as labelled price lines;
+  // zone-style features become compact boxes so they do not flood the chart.
   const feed = useStore((s) => s.feed);
+  const symbolData = feed[feedLookupKey(baseSymbol, feed)];
+
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
@@ -303,53 +372,148 @@ const LiveChart: React.FC<LiveChartProps> = ({
       }
     }
     structurePriceLinesRef.current = [];
+    structureZonesRef.current = [];
+    setStructureBoxes([]);
 
     const engineTf = toEngineTimeframe(timeframe);
-    const symbolData = feed[baseSymbol];
-    if (!symbolData) return;
+    if (!symbolData || !enableOverlays) return;
 
-    const snrLevels: any[] = symbolData.snr_levels?.[engineTf] ?? [];
-    const orderBlocks: any[] = symbolData.order_blocks?.[engineTf] ?? [];
-    const fvgs: any[] = symbolData.fvg?.[engineTf] ?? [];
+    const snrEntries = overlays.snr
+      ? SNR_TIMEFRAMES.flatMap((tf) =>
+          ((symbolData.snr_levels?.[tf] ?? []) as any[]).map((lvl) => ({ ...lvl, tf }))
+        )
+      : [];
+    const orderBlocks: any[] = overlays.ob ? symbolData.order_blocks?.[engineTf] ?? [] : [];
+    const fvgs: any[] = overlays.fvg ? symbolData.fvg?.[engineTf] ?? [] : [];
+    const supplyDemandZones: any[] = overlays.snd ? symbolData.supply_demand_zones?.[engineTf] ?? [] : [];
 
-    for (const lvl of snrLevels) {
+    for (const lvl of snrEntries) {
       const price = Number(lvl.level);
       if (!Number.isFinite(price)) continue;
+      const isResistance = String(lvl.type).toLowerCase() === "resistance";
+      const status = String(lvl.status ?? "").toLowerCase() === "tested" ? "tested" : "untested";
+      const label = lvl.label || `${status} ${String(lvl.type).toLowerCase()} ${lvl.tf}`;
       structurePriceLinesRef.current.push(
         series.createPriceLine({
           price,
-          color: lvl.type === "Resistance" ? theme.colors.red : theme.colors.green,
+          color: isResistance ? theme.colors.red : theme.colors.green,
           lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
+          lineStyle: status === "tested" ? LineStyle.Solid : LineStyle.Dashed,
           axisLabelVisible: true,
-          title: `SNR ${lvl.type}`,
+          title: label,
         })
       );
     }
 
-    for (const ob of orderBlocks) {
+    const nextZones: StructureZone[] = [];
+    const addBox = (
+      id: string,
+      label: string,
+      topPrice: number,
+      bottomPrice: number,
+      color: string,
+      rawTime?: StrategySignal["timestamp"]
+    ) => {
+      nextZones.push({
+        id,
+        label,
+        topPrice,
+        bottomPrice,
+        color,
+        timestamp: rawTime,
+      });
+    };
+
+    orderBlocks.slice(-4).forEach((ob, index) => {
       const high = Number(ob.high);
       const low = Number(ob.low);
-      if (!Number.isFinite(high) || !Number.isFinite(low)) continue;
-      const color = ob.type === "Bullish" ? theme.colors.green : theme.colors.red;
-      const suffix = ob.mitigated ? " (mitigated)" : "";
-      structurePriceLinesRef.current.push(
-        series.createPriceLine({ price: high, color, lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: `OB ${ob.type} top${suffix}` }),
-        series.createPriceLine({ price: low, color, lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: `OB ${ob.type} bottom${suffix}` })
-      );
-    }
+      if (!Number.isFinite(high) || !Number.isFinite(low)) return;
+      const isBullish = ob.type === "Bullish";
+      const suffix = ob.mitigated ? " mitigated" : "";
+      addBox(`ob-${index}`, `OB ${ob.type} ${engineTf}${suffix}`, high, low, isBullish ? theme.colors.green : theme.colors.red, ob.timestamp);
+    });
 
-    for (const fvg of fvgs) {
+    fvgs.slice(-4).forEach((fvg, index) => {
       const top = Number(fvg.top);
       const bottom = Number(fvg.bottom);
-      if (!Number.isFinite(top) || !Number.isFinite(bottom)) continue;
-      const color = fvg.type === "Bullish" ? theme.colors.green : theme.colors.red;
-      structurePriceLinesRef.current.push(
-        series.createPriceLine({ price: top, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: `FVG ${fvg.type} top` }),
-        series.createPriceLine({ price: bottom, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: `FVG ${fvg.type} bottom` })
+      if (!Number.isFinite(top) || !Number.isFinite(bottom)) return;
+      const isBullish = fvg.type === "Bullish";
+      addBox(`fvg-${index}`, `FVG ${fvg.type} ${engineTf}`, top, bottom, isBullish ? theme.colors.green : theme.colors.red, fvg.timestamp);
+    });
+
+    supplyDemandZones.slice(-4).forEach((zone, index) => {
+      const top = Number(zone.top);
+      const bottom = Number(zone.bottom);
+      if (!Number.isFinite(top) || !Number.isFinite(bottom)) return;
+      const isDemand = zone.type === "demand";
+      const pattern = zone.pattern ? ` ${zone.pattern}` : "";
+      const status = zone.status ? ` ${zone.status}` : "";
+      addBox(
+        `snd-${index}`,
+        `${zone.type?.toUpperCase?.() ?? "SND"}${pattern} ${engineTf}${status}`,
+        top,
+        bottom,
+        isDemand ? theme.colors.green : theme.colors.red,
+        zone.timestamp
       );
-    }
-  }, [feed, baseSymbol, timeframe]);
+    });
+
+    structureZonesRef.current = nextZones;
+    recalculateStructureBoxes();
+  }, [symbolData, baseSymbol, timeframe, enableOverlays, overlays, recalculateStructureBoxes]);
+
+  useEffect(() => {
+    const markersApi = strategyMarkersRef.current;
+    if (!markersApi) return;
+
+    const engineTf = toEngineTimeframe(timeframe);
+    const tfSeconds = normalizeTimeframe(timeframe) * 60;
+    const signals: StrategySignal[] = symbolData?.strategy_signals ?? [];
+    const currentTime = currentCandleRef.current?.time;
+
+    const strategyMarkers: SeriesMarker<Time>[] = enableStrategyMarkers ? signals
+      .filter((signal) => signal.timeframe === engineTf)
+      .map((signal, index) => {
+        const rawTime = signal.timestamp ? coerceToSeconds(signal.timestamp) : Number(currentTime);
+        const time = toCandleTime(rawTime, tfSeconds) as UTCTimestamp;
+        const price = Number(signal.price);
+        const isLong = signal.direction === "long";
+        const confidence = Number(signal.confidence);
+        const confidenceText = Number.isFinite(confidence) ? ` ${Math.round(confidence * 100)}%` : "";
+        const label = `${signal.strategy ?? "Strategy"}${confidenceText}`;
+
+        return {
+          id: `${signal.strategy ?? "strategy"}-${signal.timeframe}-${signal.direction}-${index}`,
+          time,
+          position: isLong ? "atPriceBottom" as const : "atPriceTop" as const,
+          price: Number.isFinite(price) ? price : currentCandleRef.current?.close ?? 0,
+          shape: isLong ? "arrowUp" as const : "arrowDown" as const,
+          color: isLong ? theme.colors.green : theme.colors.red,
+          text: label,
+          size: 1.2,
+        };
+      })
+      .filter((marker) => Number.isFinite(marker.time) && Number.isFinite(marker.price)) : [];
+
+    const event = symbolData?.structure_events?.[engineTf];
+    const showStructureEvent =
+      enableOverlays &&
+      event?.valid &&
+      ((event.type === "BOS" && overlays.bos) || (event.type === "CHOCH" && overlays.choch));
+    const structureMarkers: SeriesMarker<Time>[] = showStructureEvent
+      ? [{
+          id: `structure-${engineTf}-${event.type}`,
+          time: toCandleTime(coerceToSeconds(event.timestamp), tfSeconds) as UTCTimestamp,
+          position: event.direction === "Bullish" ? "belowBar" as const : "aboveBar" as const,
+          shape: event.direction === "Bullish" ? "arrowUp" as const : "arrowDown" as const,
+          color: event.type === "CHOCH" ? theme.colors.amber : theme.colors.accentBlue,
+          text: `${event.type} ${engineTf}`,
+          size: 1,
+        }].filter((marker) => Number.isFinite(marker.time))
+      : [];
+
+    markersApi.setMarkers([...structureMarkers, ...strategyMarkers]);
+  }, [symbolData, timeframe, enableStrategyMarkers, enableOverlays, overlays.bos, overlays.choch]);
 
   // Merge only NEW ticks into the current candle
   useEffect(() => {
@@ -396,14 +560,15 @@ const LiveChart: React.FC<LiveChartProps> = ({
       setOverlayOHLC({ open: candle.open, high: candle.high, low: candle.low, close: candle.close });
       setIsLive(true);
       updateLiveDotPosition();
+      recalculateStructureBoxes();
 
-      onStatsUpdate?.({
+      onStatsUpdateRef.current?.({
         name: baseSymbol,
         ohlc: { open: candle.open, high: candle.high, low: candle.low, close: candle.close },
         lastUpdate: "latest",
       });
     }
-  }, [ticks, timeframe, baseSymbol, onStatsUpdate, updateLiveDotPosition]);
+  }, [ticks, timeframe, baseSymbol, updateLiveDotPosition, recalculateStructureBoxes]);
 
   if (!baseSymbol) {
     return (
@@ -422,22 +587,103 @@ const LiveChart: React.FC<LiveChartProps> = ({
         height: height ? `${height}px` : "100%",
       }}
     >
-      {/* Toolbar */}
-      <div
-        style={{
-          display: "flex",
-          gap: theme.spacing.sm,
-          padding: theme.spacing.sm,
-          borderBottom: `1px solid ${theme.colors.grid}`,
-          background: theme.colors.panel,
-          alignItems: "center",
-        }}
-      >
-        <IndicatorSelector
-          selectedIndicators={selectedIndicators}
-          onToggleIndicator={handleToggleIndicator}
-        />
-      </div>
+      {showHeader && (
+        <div
+          style={{
+            display: "flex",
+            gap: theme.spacing.sm,
+            padding: "6px 8px",
+            borderBottom: `1px solid ${theme.colors.grid}`,
+            background: theme.colors.panel,
+            alignItems: "center",
+            justifyContent: "space-between",
+            minHeight: 42,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+            {enableDrawing && TOOL_BUTTONS.map(({ mode, label, icon }) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setDrawingMode((current) => (current === mode ? null : mode))}
+                title={label}
+                aria-label={label}
+                style={chartToolButtonStyle(drawingMode === mode)}
+              >
+                {icon}
+              </button>
+            ))}
+
+            {enableDrawing && (
+              <>
+                <div style={{ width: 1, height: 22, background: theme.colors.grid }} />
+                {COLORS.map((swatch) => (
+                  <button
+                    key={swatch}
+                    type="button"
+                    onClick={() => setDrawingColor(swatch)}
+                    title={`Color ${swatch}`}
+                    aria-label={`Color ${swatch}`}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: "50%",
+                      border: `2px solid ${drawingColor === swatch ? theme.colors.text : theme.colors.grid}`,
+                      background: swatch,
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  />
+                ))}
+                <input
+                  type="range"
+                  min={1}
+                  max={5}
+                  value={drawingWidth}
+                  onChange={(event) => setDrawingWidth(Number(event.target.value))}
+                  title="Line width"
+                  aria-label="Line width"
+                  style={{ width: 54 }}
+                />
+                {drawingMode === "rect" && (
+                  <input
+                    type="text"
+                    value={boxLabel}
+                    onChange={(event) => setBoxLabel(event.target.value)}
+                    placeholder="box label"
+                    title="Box label"
+                    aria-label="Box label"
+                    style={chartInputStyle}
+                  />
+                )}
+                <button type="button" onClick={drawingActions?.undo} title="Undo" aria-label="Undo" style={chartToolButtonStyle(false)}>
+                  U
+                </button>
+                <button type="button" onClick={drawingActions?.clear} title="Clear drawings" aria-label="Clear drawings" style={chartToolButtonStyle(false)}>
+                  X
+                </button>
+              </>
+            )}
+          </div>
+
+          {enableOverlays && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {(["snr", "snd", "ob", "fvg", "bos", "choch"] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setOverlays((current) => ({ ...current, [key]: !current[key] }))}
+                  title={`Toggle ${key.toUpperCase()}`}
+                  aria-label={`Toggle ${key.toUpperCase()}`}
+                  style={overlayToggleStyle(overlays[key])}
+                >
+                  {key.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Chart container */}
       <div
@@ -446,10 +692,59 @@ const LiveChart: React.FC<LiveChartProps> = ({
           position: "relative",
           flex: 1,
           minHeight: 0,
+          width: "100%",
+          overflow: "hidden",
         }}
       >
-        {/* Drawing tools overlay */}
-        <DrawingTools containerRef={containerRef as React.RefObject<HTMLDivElement>} />
+        <div
+          ref={chartHostRef}
+          style={{
+            position: "absolute",
+            inset: 0,
+          }}
+        />
+
+        {structureBoxes.map((box) => (
+          <div
+            key={box.id}
+            style={{
+              position: "absolute",
+              left: box.left,
+              width: box.width,
+              top: box.top,
+              height: box.height,
+              minHeight: 16,
+              border: `1px solid ${box.borderColor}`,
+              background: box.color,
+              color: theme.colors.text,
+              fontSize: 11,
+              fontWeight: 700,
+              lineHeight: "14px",
+              padding: "1px 5px",
+              overflow: "hidden",
+              whiteSpace: "nowrap",
+              textOverflow: "ellipsis",
+              pointerEvents: "none",
+              zIndex: 5,
+            }}
+          >
+            {box.label}
+          </div>
+        ))}
+
+        {enableDrawing && (
+          <DrawingTools
+            containerRef={containerRef as React.RefObject<HTMLDivElement>}
+            storageKey={`${baseSymbol}:${toEngineTimeframe(timeframe)}`}
+            hideToolbar
+            controlledMode={drawingMode}
+            controlledColor={drawingColor}
+            controlledLineWidth={drawingWidth}
+            controlledBoxLabel={boxLabel}
+            onDrawingModeChange={setDrawingMode}
+            onActionsReady={setDrawingActions}
+          />
+        )}
 
         {isLoadingHistory && (
           <div
@@ -531,6 +826,51 @@ const LiveChart: React.FC<LiveChartProps> = ({
       </div>
     </div>
   );
+};
+
+function chartToolButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    width: 28,
+    height: 28,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: active ? theme.colors.accentBlue : theme.colors.bg,
+    color: active ? theme.colors.bg : theme.colors.text,
+    border: `1px solid ${active ? theme.colors.accentBlue : theme.colors.grid}`,
+    borderRadius: theme.radius.sm,
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: 700,
+    lineHeight: 1,
+  };
+}
+
+function overlayToggleStyle(active: boolean): React.CSSProperties {
+  return {
+    height: 26,
+    padding: "0 8px",
+    background: active ? `${theme.colors.accentBlue}33` : theme.colors.bg,
+    color: active ? theme.colors.accentBlue : theme.colors.textDim,
+    border: `1px solid ${active ? theme.colors.accentBlue : theme.colors.grid}`,
+    borderRadius: theme.radius.sm,
+    cursor: "pointer",
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: 0,
+  };
+}
+
+const chartInputStyle: React.CSSProperties = {
+  width: 92,
+  height: 26,
+  padding: "0 8px",
+  border: `1px solid ${theme.colors.grid}`,
+  borderRadius: theme.radius.sm,
+  background: theme.colors.bg,
+  color: theme.colors.text,
+  fontSize: 12,
+  outline: "none",
 };
 
 export default LiveChart;

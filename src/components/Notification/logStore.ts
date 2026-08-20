@@ -2,7 +2,7 @@
 import { create } from "zustand";
 import type { Pulse } from "../../ui/PulseBox";
 
-type LogType = "signal" | "error" | "system" | "notification" | "escalation";
+type LogType = "signal" | "error" | "system" | "notification" | "escalation" | "order";
 
 export interface LogEntry {
   id: string;
@@ -36,7 +36,7 @@ export const useLogStore = create<LogState>((set) => ({
           timestamp: Date.now(),
           ...entry,
         },
-      ],
+      ].slice(-250),
     }));
   },
   pulseTrigger: [],

@@ -54,6 +54,10 @@ const MultiTimeframeView: React.FC = () => {
           timeframe={tf}
           ticks={ticks ?? []}
           onStatsUpdate={() => {}}
+          showHeader={false}
+          enableDrawing={false}
+          enableOverlays={false}
+          enableStrategyMarkers={false}
         />
       ) : (
         <div style={{ padding: 12, color: theme.colors.textDim, fontSize: 12 }}>

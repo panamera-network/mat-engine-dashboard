@@ -1,7 +1,17 @@
-export function transformCorrelationGraph(data: Record<string, any>, focusSymbol = "XAUUSD_i") {
+interface BiasTimeframeData {
+  score?: number;
+}
+
+interface SymbolCorrelationData {
+  bias?: Record<string, BiasTimeframeData>;
+}
+
+type CorrelationFeed = Record<string, SymbolCorrelationData>;
+
+export function transformCorrelationGraph(data: CorrelationFeed, focusSymbol = "XAUUSD_i") {
   const tfOrder = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"];
 
-  function extractBiasVector(symbolData: { bias: { [x: string]: { score: any; }; }; }) {
+  function extractBiasVector(symbolData?: SymbolCorrelationData) {
     const vec = tfOrder.map((tf) => {
       const score = symbolData?.bias?.[tf]?.score;
       return typeof score === "number" && isFinite(score) ? score : 0;
@@ -9,12 +19,12 @@ export function transformCorrelationGraph(data: Record<string, any>, focusSymbol
     return normalize(vec);
   }
 
-  function normalize(vec: any[]) {
+  function normalize(vec: number[]) {
     const max = Math.max(...vec.map((v) => Math.abs(v)));
     return max ? vec.map((v) => v / max) : vec;
   }
 
-  function pearson(a: any[], b: any[]) {
+  function pearson(a: number[], b: number[]) {
     const n = a.length;
     const avgA = a.reduce((sum, x) => sum + x, 0) / n;
     const avgB = b.reduce((sum, x) => sum + x, 0) / n;
@@ -24,7 +34,7 @@ export function transformCorrelationGraph(data: Record<string, any>, focusSymbol
     return stdA && stdB ? cov / (stdA * stdB) : 0;
   }
 
-  function classify(id: string | string[]) {
+  function classify(id: string) {
     if (id.includes("USD") || id.includes("CAD") || id.includes("JPY")) return "FX";
     if (id.includes("BTC") || id.includes("ETH") || id.includes("SOL")) return "Crypto";
     if (id.includes("XAU") || id.includes("XAG") || id.includes("WTI")) return "Commodity";
@@ -34,15 +44,17 @@ export function transformCorrelationGraph(data: Record<string, any>, focusSymbol
   }
 
   const symbols = Object.keys(data);
-  const links = [];
+  if (!data[focusSymbol]) return { nodes: [], links: [] };
+
+  const links: Array<{ source: string; target: string; value: number }> = [];
   const nodesSet = new Set([focusSymbol]);
+  const vecFocus = extractBiasVector(data[focusSymbol]);
 
   for (let i = 0; i < symbols.length; i++) {
     const a = symbols[i];
     if (a === focusSymbol) continue;
 
     const vecA = extractBiasVector(data[a]);
-    const vecFocus = extractBiasVector(data[focusSymbol]);
     const corr = pearson(vecA, vecFocus);
 
     if (Math.abs(corr) > 0.5) {

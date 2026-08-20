@@ -8,9 +8,9 @@ interface VolumeMeterProps {
 }
 
 export const VolumeMeter: React.FC<VolumeMeterProps> = ({ size = 200 }) => {
-  const { dataKey } = useActiveSymbol();
-  const rawVol = useStore((s) => (dataKey ? s.volume[dataKey] : undefined));
-  const avgVol = useStore((s) => (dataKey ? s.avgVolume[dataKey] : 100));
+  const { feedKey, dataKey } = useActiveSymbol();
+  const rawVol = useStore((s) => s.volume[feedKey] ?? (dataKey ? s.volume[dataKey] : undefined));
+  const avgVol = useStore((s) => s.avgVolume[feedKey] ?? (dataKey ? s.avgVolume[dataKey] : 100));
   const value = typeof rawVol === "number" && isFinite(rawVol) ? rawVol : 0;
   const safeAvg = typeof avgVol === "number" && isFinite(avgVol) && avgVol > 0 ? avgVol : 100;
   const ratio = value / safeAvg;

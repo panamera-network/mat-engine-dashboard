@@ -18,7 +18,11 @@ export const AuditTrail: React.FC<AuditTrailProps> = ({ events }) => {
   return (
     <Panel title="Audit trail" style={{ width: '100%' }}>
       <div style={{ display: 'grid', gap: theme.spacing.xs }}>
-        {events.slice(0, 5).map((e, i) => (
+        {events.length === 0 ? (
+          <div style={{ color: theme.colors.textDim, fontSize: 12, padding: theme.spacing.sm }}>
+            No audit events yet
+          </div>
+        ) : events.slice(0, 5).map((e, i) => (
           <div
             key={i}
             style={{
