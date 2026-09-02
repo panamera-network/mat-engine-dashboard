@@ -10,13 +10,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mat/chart-core": "file:../MAT-ai-trading-terminal/packages/chart-core",
+    "@mat/chart-surface": "file:../MAT-ai-trading-terminal/packages/chart-surface",
+    "@mat/trading-terminal-surface": "file:../MAT-ai-trading-terminal/packages/trading-terminal-surface",
     "@hello-pangea/dnd": "^18.0.1",
     "@react-spring/web": "^10.0.3",
     "@tanstack/react-query": "^5.83.0",
     "@tanstack/react-query-devtools": "^5.83.0",
     "axios": "^1.11.0",
     "chart.js": "^4.5.0",
-    "lightweight-charts": "^5.0.8",
+    "lightweight-charts": "^5.2.0",
     "luxon": "^3.7.1",
     "papaparse": "^5.5.3",
     "react": "^19.1.0",

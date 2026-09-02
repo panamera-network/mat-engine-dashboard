@@ -24,8 +24,18 @@ export function coerceToSeconds(raw: unknown): number {
   if (raw == null) return 0;
   if (typeof raw === "number")
     return raw > 1e12 ? Math.floor(raw / 1000) : Math.floor(raw);
-  if (typeof raw === "string")
+  if (typeof raw === "string") {
+    // The engine sends zone/event timestamps as a plain numeric-epoch
+    // string (e.g. "1788365700"), which `new Date(...)` cannot parse (it
+    // expects ISO-8601/RFC-2822 and returns Invalid Date for bare digits) —
+    // treat a purely-numeric string as a number first, matching how the
+    // `number` branch above already handles seconds vs. milliseconds.
+    if (/^\d+$/.test(raw)) {
+      const numeric = Number(raw);
+      return numeric > 1e12 ? Math.floor(numeric / 1000) : Math.floor(numeric);
+    }
     return Math.floor(new Date(raw).getTime() / 1000);
+  }
   if (typeof raw === "object") {
     const obj = raw as Record<string, unknown>;
     if ("seconds" in obj) return Math.floor(Number(obj.seconds));

@@ -30,5 +30,13 @@ export default defineConfig({
     alias: {
       // no alias needed for three in 2D mode
     },
+    // @mat/chart-core, @mat/chart-surface, @mat/trading-terminal-surface are
+    // consumed via file: links to a sibling repo (MAT-ai-trading-terminal),
+    // not this project's own node_modules — without dedupe, their compiled
+    // dist code resolves react/react-dom relative to THEIR location (through
+    // the symlink), loading a second React instance alongside this app's own
+    // and breaking hooks/rendering ("Invalid hook call" / "multiple copies of
+    // react"). This forces every resolution to this project's single copy.
+    dedupe: ['react', 'react-dom'],
   },
 })
