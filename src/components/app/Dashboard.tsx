@@ -11,6 +11,7 @@ import ChartPanel from "../chart/ChartPanel";
 import MarketHeatmap from "../Heatmap/MarketHeatmap";
 import { InstrumentStrip } from "../InstrumentStrip/InstrumentStrip";
 import MultiTimeframeView from "../chart/MultiTimeframeView";
+import { MultiTimeframeAddChart } from "../chart/MultiTimeframeAddChart";
 import { PulseBox } from "../../ui/PulseBox";
 import { LiveSignalFeed } from "../system/LiveSignalFeed";
 import { TickStream } from "../system/TickStream";
@@ -83,7 +84,10 @@ const Dashboard: React.FC = () => {
           </PulseBox>
         </div>
         <PulseBox flex={1} trigger={pulses.multiTimeframe}>
-          <HUDHeader>📊 Multi‑timeframe view</HUDHeader>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: theme.spacing.sm }}>
+            <HUDHeader>📊 Multi‑timeframe view</HUDHeader>
+            <MultiTimeframeAddChart />
+          </div>
           {separator}
           <MultiTimeframeView />
         </PulseBox>

@@ -19,7 +19,13 @@ import MultiTimeframeView from "./MultiTimeframeView";
 
 const CHART_TYPES: readonly ChartType[] = ["candlestick", "line", "area"];
 const OVERLAY_TOGGLE_KEYS: readonly (keyof StrategyOverlayToggles)[] = ["snr", "snd", "ob", "fvg", "bos", "choch"];
-const PANEL_ACTIONS: readonly TerminalPanelId[] = ["alerts", "strategy", "dom", "order", "pnl", "journal", "mtf"];
+// Strategy is rendered as a custom toolbarControls button (see below) so it
+// sits right after Indicators, ahead of SNR/SND/OB/FVG/BOS/CHOCH — the
+// native panelActions group always renders after toolbarControls, so it
+// can't be placed there. DOM / Order / P&L dropped: DOM and Order are
+// non-functional placeholders (see NotConnectedPanel below) and P&L just
+// duplicated the header's "Account ▾" dropdown.
+const PANEL_ACTIONS: readonly TerminalPanelId[] = ["alerts", "journal", "mtf"];
 
 /** Honest "not available" panel — used where this dashboard genuinely has no
  *  underlying data/capability, instead of faking one. */
@@ -70,6 +76,9 @@ const ChartPanel = () => {
   const [drawingTool, setDrawingTool] = useState<DrawingType>("cursor");
   const [magnetEnabled, setMagnetEnabled] = useState(false);
   const [fullCanvas, setFullCanvas] = useState(false);
+  // Lifted so the custom Strategy toolbar button (below) can open the same
+  // native "strategy" panel slot the terminal surface itself manages.
+  const [activePanel, setActivePanel] = useState<TerminalPanelId | null>(null);
 
   useEffect(() => {
     fetch("/api/mt5/symbols")
@@ -92,6 +101,35 @@ const ChartPanel = () => {
 
   const chartCoreTimeframe = toChartCoreTimeframe(selectedTimeframe);
   const showChart = isReady && chartSymbol && !isResolvingSymbol;
+
+  // Rendered inside the terminal surface's own chart toolbar (right after
+  // Indicators, before Alerts/Journal/MTF) instead of a separate row above
+  // the chart — same toggles/store, just relocated.
+  const toolbarControls = (
+    <>
+      <button
+        type="button"
+        onClick={() => setActivePanel((prev) => (prev === "strategy" ? null : "strategy"))}
+        title="Toggle Strategy panel"
+        aria-label="Toggle Strategy panel"
+        style={overlayToggleStyle(activePanel === "strategy")}
+      >
+        Strategy
+      </button>
+      {OVERLAY_TOGGLE_KEYS.map((key) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => toggleOverlay(key)}
+          title={`Toggle ${key.toUpperCase()}`}
+          aria-label={`Toggle ${key.toUpperCase()}`}
+          style={overlayToggleStyle(overlayToggles[key])}
+        >
+          {key.toUpperCase()}
+        </button>
+      ))}
+    </>
+  );
 
   const panels: TerminalPanelSlots = {
     alerts: {
@@ -148,32 +186,6 @@ const ChartPanel = () => {
         minHeight: 0,
       }}
     >
-      {showChart && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            flexWrap: "wrap",
-            padding: "4px 8px",
-            borderBottom: `1px solid ${theme.colors.grid}`,
-            background: theme.colors.panelAlt,
-          }}
-        >
-          {OVERLAY_TOGGLE_KEYS.map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => toggleOverlay(key)}
-              title={`Toggle ${key.toUpperCase()}`}
-              aria-label={`Toggle ${key.toUpperCase()}`}
-              style={overlayToggleStyle(overlayToggles[key])}
-            >
-              {key.toUpperCase()}
-            </button>
-          ))}
-        </div>
-      )}
       <div style={{ flex: 1, minHeight: 0 }}>
         <ErrorBoundary>
           {showChart ? (
@@ -234,8 +246,11 @@ const ChartPanel = () => {
                 magnetEnabled,
                 onMagnetEnabledChange: setMagnetEnabled,
                 fullCanvas: { isFullCanvas: fullCanvas, onFullCanvasChange: setFullCanvas },
+                toolbarControls,
               }}
               panels={panels}
+              activePanel={activePanel}
+              onActivePanelChange={setActivePanel}
               chrome={{ panelActions: PANEL_ACTIONS, showBottomDock: false, drawingRailMode: "grouped" }}
             />
           ) : (
