@@ -4,37 +4,29 @@ import { theme } from "../../theme";
 import { useStore } from "../system/store";
 import { HUDHeader, separator } from "../../ui/HUD";
 
-import SessionTracker from "../SessionTracker/SessionTracker";
 import CurrencyMeter from "../Strength_meter/CurrencyMeter";
 import { BiasTable } from "../BiasTable/BiasTable";
 import { ModeToggle } from "../Strength_meter/toggle";
 import ChartPanel from "../chart/ChartPanel";
-import CorrelationClusters from "../Correlation/CorrelationClusters";
+import MarketHeatmap from "../Heatmap/MarketHeatmap";
 import { InstrumentStrip } from "../InstrumentStrip/InstrumentStrip";
 import MultiTimeframeView from "../chart/MultiTimeframeView";
 import { PulseBox } from "../../ui/PulseBox";
-import { useLogStore } from "../Notification/logStore";
-import { NotificationPanel } from "../Notification/NotificationPanel";
 import { LiveSignalFeed } from "../system/LiveSignalFeed";
 import { TickStream } from "../system/TickStream";
 import { EnginePoller } from "../system/EnginePoller";
-import AccInfo from "../AccInfo";
-import { useSystemStatus } from "../sidepanel/useSystemStatus";
 import { StrategyControl } from "../StrategyControl/StrategyControl";
 import { SymbolSelector } from "../SymbolSelector";
 import { BiasFeedStatus } from "../BiasFeedStatus";
 
 const Dashboard: React.FC = () => {
   const pulses = useStore((s) => s.pulses);
-  const logs = useLogStore((s) => s.logs);
-
-  const { data: status } = useSystemStatus();
 
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1fr)",
+        gridTemplateColumns: "minmax(0, 1.7fr) minmax(0, 2fr) minmax(0, 1fr)",
         gap: theme.spacing.md,
         width: "100%",
         height: "100%",
@@ -48,36 +40,11 @@ const Dashboard: React.FC = () => {
       <TickStream />
       <EnginePoller />
 
-      {/* Column 1 */}
+      {/* Pair Selection — Pair Bias Overview on top, Market Heatmap +
+          Currency Strength directly below. Header controls (Symbols /
+          Bias Feed) unchanged. */}
       <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0, minWidth: 0 }}>
-        <PulseBox flex={1}>
-          <HUDHeader>Acc Info</HUDHeader>
-          {separator}
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: theme.colors.textDim }}>
-            <AccInfo account={status?.mt5?.account ?? null} />
-          </div>
-        </PulseBox>
-        <PulseBox flex={0.6}>
-          <HUDHeader>🕒 Session Tracker</HUDHeader>
-          {separator}
-          <SessionTracker />
-        </PulseBox>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: theme.spacing.sm,
-            flex: 2.4,
-            minHeight: 0,
-          }}
-        >
-          <NotificationPanel logs={logs} />
-        </div>
-      </div>
-
-      {/* Column 2 */}
-      <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0, minWidth: 0 }}>
-        <PulseBox flex={2} trigger={pulses.bias}>
+        <PulseBox flex={1.6} trigger={pulses.bias}>
           <div style={{ display: "flex", alignItems: "center", gap: theme.spacing.sm, flexWrap: "nowrap" }}>
             <HUDHeader>📊 Pair Bias Overview</HUDHeader>
             <span style={{ color: theme.colors.grid, fontSize: 13 }}>|</span>
@@ -88,11 +55,11 @@ const Dashboard: React.FC = () => {
           {separator}
           <BiasTable />
         </PulseBox>
-        <div style={{ display: "flex", gap: theme.spacing.md, flex: 1.2, minHeight: 0, minWidth: 0 }}>
+        <div style={{ display: "flex", gap: theme.spacing.md, flex: 1, minHeight: 0, minWidth: 0 }}>
           <PulseBox flex={1} trigger={pulses.correlation}>
-            <HUDHeader>🔗 Correlation Clusters</HUDHeader>
+            <HUDHeader>🗺️ Market Heatmap</HUDHeader>
             {separator}
-            <CorrelationClusters />
+            <MarketHeatmap />
           </PulseBox>
           <PulseBox flex={1} trigger={pulses.currency}>
             <HUDHeader>💪 Currency Strength</HUDHeader>
@@ -103,29 +70,52 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Column 3 */}
+      {/* Trade Inspection — Scalp Diagnostics shrunk to content height on
+          top (InstrumentStrip.tsx now lays Audit Trail / Verdict / CCI
+          out as one row instead of stacked), then Multi-timeframe view,
+          then Market Overview as the dominant chart. */}
       <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0, minWidth: 0 }}>
+        <div style={{ flex: "0 0 auto", minWidth: 0 }}>
+          <PulseBox trigger={pulses.timeline || pulses.volatility}>
+            <HUDHeader>⚡ Scalp Diagnostics</HUDHeader>
+            {separator}
+            <InstrumentStrip />
+          </PulseBox>
+        </div>
         <PulseBox flex={1} trigger={pulses.multiTimeframe}>
           <HUDHeader>📊 Multi‑timeframe view</HUDHeader>
           {separator}
           <MultiTimeframeView />
         </PulseBox>
-        <PulseBox flex={1.5} trigger={pulses.market}>
+        <PulseBox flex={1.8} trigger={pulses.market}>
           <HUDHeader>📈 Market Overview</HUDHeader>
           {separator}
           <ChartPanel />
         </PulseBox>
       </div>
 
-      {/* Column 4 */}
+      {/* Strategy — Strategy Control, with reserved space below for the
+          future Strategy Tester (placeholder only, no logic yet). */}
       <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0, minWidth: 0 }}>
-        <PulseBox flex={2.5} trigger={pulses.timeline || pulses.volatility}>
-          <HUDHeader>⚡ Scalp Verdict · Bias & Volatility</HUDHeader>
-          {separator}
-          <InstrumentStrip />
+        <PulseBox flex={1.5}>
+          <StrategyControl />
         </PulseBox>
         <PulseBox flex={1}>
-          <StrategyControl />
+          <HUDHeader>🧪 Strategy Tester</HUDHeader>
+          {separator}
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: theme.colors.textDim,
+              fontStyle: "italic",
+              fontSize: 13,
+            }}
+          >
+            Coming soon
+          </div>
         </PulseBox>
       </div>
     </div>

@@ -3,6 +3,8 @@ import React, { useState } from "react";
 import { theme } from "../../theme";
 import { useSystemStatus } from "../sidepanel/useSystemStatus";
 import { useStore } from "../system/store";
+import { AccountMenu } from "../AccountMenu";
+import { NotificationBell } from "../Notification/NotificationBell";
 
 type DotStatus = "ok" | "bad" | "neutral";
 
@@ -84,6 +86,7 @@ const Header: React.FC = () => {
     : "ok";
 
   const mt5Status: DotStatus = !status?.mt5 ? "neutral" : status.mt5.initialized ? "ok" : "bad";
+  const account = status?.mt5?.account ?? null;
 
   const dataFeedStatus: DotStatus =
     wsBiasStatus === "connected" && wsTickStatus === "connected"
@@ -109,7 +112,6 @@ const Header: React.FC = () => {
         borderBottom: `1px solid ${theme.colors.grid}`,
         flexShrink: 0,
         padding: `0 ${theme.spacing.md}`,
-        overflow: "hidden",
       }}
     >
       <div
@@ -137,6 +139,9 @@ const Header: React.FC = () => {
       <div style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Mat-AI Engine Dashboard</div>
 
       <div style={{ display: "flex", alignItems: "center", justifySelf: "end", gap: theme.spacing.md, whiteSpace: "nowrap" }}>
+        <AccountMenu account={account} />
+        <NotificationBell />
+
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           <span style={{ color: theme.colors.textDim }}>Last Update</span>
           <span style={{ color: theme.colors.text, fontFamily: theme.fonts.mono }}>{lastUpdateLabel}</span>

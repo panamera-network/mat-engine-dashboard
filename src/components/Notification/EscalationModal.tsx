@@ -29,6 +29,7 @@ export const EscalationModal: React.FC<EscalationModalProps> = ({
     <div
       style={{
         position: "fixed",
+        visibility: "visible", // overrides a hidden ancestor (e.g. the closed NotificationBell dropdown) so critical alerts still pop up
         top: 80,
         left: "50%",
         transform: "translateX(-50%)",
