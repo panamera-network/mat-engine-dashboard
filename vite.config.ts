@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react-swc'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: 5180,
     proxy: {
       // Both /api (routes/mt5_status.py, routes/system_status.py) and /core
       // (api/core_router.py) are mounted by mat-strategy-engine itself, on its

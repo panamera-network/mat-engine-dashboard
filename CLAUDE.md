@@ -299,7 +299,7 @@ VITE_WS_URL=ws://localhost:8000        # Backend WebSocket base URL
 ```bash
 npm install
 npm run dev
-# Runs on http://localhost:5173 (or next available port)
+# Runs on http://localhost:5180 (or next available port)
 ```
 
 ### Build for Production

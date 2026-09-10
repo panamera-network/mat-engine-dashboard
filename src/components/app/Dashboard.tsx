@@ -21,6 +21,8 @@ import { EnginePoller } from "../system/EnginePoller";
 import AccInfo from "../AccInfo";
 import { useSystemStatus } from "../sidepanel/useSystemStatus";
 import { StrategyControl } from "../StrategyControl/StrategyControl";
+import { SymbolSelector } from "../SymbolSelector";
+import { BiasFeedStatus } from "../BiasFeedStatus";
 
 const Dashboard: React.FC = () => {
   const pulses = useStore((s) => s.pulses);
@@ -76,7 +78,13 @@ const Dashboard: React.FC = () => {
       {/* Column 2 */}
       <div style={{ display: "flex", flexDirection: "column", gap: theme.spacing.md, minHeight: 0, minWidth: 0 }}>
         <PulseBox flex={2} trigger={pulses.bias}>
-          <HUDHeader>📊 Pair Bias Overview</HUDHeader>
+          <div style={{ display: "flex", alignItems: "center", gap: theme.spacing.sm, flexWrap: "nowrap" }}>
+            <HUDHeader>📊 Pair Bias Overview</HUDHeader>
+            <span style={{ color: theme.colors.grid, fontSize: 13 }}>|</span>
+            <SymbolSelector />
+            <span style={{ color: theme.colors.grid, fontSize: 13 }}>|</span>
+            <BiasFeedStatus />
+          </div>
           {separator}
           <BiasTable />
         </PulseBox>

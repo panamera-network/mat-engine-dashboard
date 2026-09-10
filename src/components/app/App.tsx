@@ -2,7 +2,6 @@ import React from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import { theme } from "../../theme";
 import Header from "./Header";
-import SidePanel from "./SidePanel";
 import Dashboard from "./Dashboard";
 import Footer from "./Footer";
 
@@ -40,7 +39,6 @@ const App: React.FC = () => {
         <Header />
 
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-          <SidePanel />
           <main
             style={{
               flex: 1,
