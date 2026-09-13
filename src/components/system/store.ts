@@ -49,8 +49,8 @@ function deriveTrendSlope(feed: Record<string, any>, symbol: string) {
 
 // Flattens feed[symbol].supply_demand_zones (per-TF lists) into Level[] for
 // the liquidity heatmap — price = zone midpoint, size = ATR-relative
-// strength. Replaces reading feed[symbol].liquidityLevels, which never
-// existed in the real /core/output schema.
+// impulse strength. Replaces reading feed[symbol].liquidityLevels, which
+// never existed in the real /core/output schema.
 function deriveLiquidityLevels(feed: Record<string, any>, symbol: string): Level[] {
   const zonesByTf = feed[symbol]?.supply_demand_zones ?? {};
   const levels: Level[] = [];
@@ -59,7 +59,7 @@ function deriveLiquidityLevels(feed: Record<string, any>, symbol: string): Level
     for (const zone of zonesByTf[tf] ?? []) {
       const top = Number(zone.top);
       const bottom = Number(zone.bottom);
-      const strength = Number(zone.strength);
+      const strength = Number(zone.impulse_strength);
       if (Number.isFinite(top) && Number.isFinite(bottom) && Number.isFinite(strength)) {
         levels.push({ price: (top + bottom) / 2, size: strength });
       }

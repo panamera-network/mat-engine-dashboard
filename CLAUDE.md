@@ -338,7 +338,7 @@ fields that never existed in the real backend (`volatilityHistory`,
     "snr_levels": { "M1": [{ "type": "Resistance", "level": 4074.13, "source": "HH", "valid": true }], ... },
     "order_blocks": { "H4": [{ "type": "Bullish", "high": ..., "low": ..., "valid": true, "mitigated": false }], ... },
     "fvg": { "M1": [{ "type": "Bullish", "top": ..., "bottom": ..., "mitigated": false }], ... },
-    "supply_demand_zones": { "M1": [{ "type": "supply", "top": ..., "bottom": ..., "strength": 1.18, "valid": true }], ... }
+    "supply_demand_zones": { "M1": [{ "type": "supply", "top": ..., "bottom": ..., "impulse_strength": 1.18, "valid": true }], ... }
   },
   ...
 }
